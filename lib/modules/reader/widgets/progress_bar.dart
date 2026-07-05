@@ -49,7 +49,7 @@ class ProgressBar extends GetView<ReaderController> {
                 thumbColor: AppColors.primary,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                overlayColor: AppColors.primary.withOpacity(0.2),
+                overlayColor: AppColors.primary.withValues(alpha: 0.2),
               ),
               child: Slider(
                 value: current.toDouble().clamp(1.0, total.toDouble()),

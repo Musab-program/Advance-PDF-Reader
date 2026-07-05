@@ -1,11 +1,12 @@
 // lib/modules/folder/controllers/folder_controller.dart
-import 'dart:io';
 import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf_reader/core/services/storage_service.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/data/models/pdf_file_model.dart';
 import 'package:pdf_reader/domain/entities/pdf_entity.dart';
+import 'package:pdf_reader/domain/entities/library_item.dart';
+import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
 
 class FolderController extends GetxController {
   final StorageService _storageService = Get.find<StorageService>();
@@ -53,7 +54,7 @@ class FolderController extends GetxController {
           cmp = (a.lastRead ?? DateTime(0)).compareTo(b.lastRead ?? DateTime(0));
           break;
         case 'size':
-          cmp = (a.size ?? 0).compareTo(b.size ?? 0);
+          cmp = a.size.compareTo(b.size);
           break;
       }
       return isAscending.value ? cmp : -cmp;
@@ -108,6 +109,32 @@ class FolderController extends GetxController {
     }
   }
 
+  /// Check if a PDF is favorited
+  bool isFavorite(String path) {
+    return _storageService.isFavorite(path);
+  }
+
+  /// Toggle Favorite status
+  void toggleFavorite(PdfEntity pdf) {
+    final item = LibraryItem(
+      path: pdf.path,
+      name: pdf.name,
+      type: LibraryItemType.file,
+      size: pdf.size,
+      extension: 'PDF',
+      dateModified: pdf.lastRead ?? DateTime.now(),
+    );
+    _storageService.toggleFavorite(item);
+    
+    // Force sync with HomeController
+    try {
+      final homeController = Get.find<HomeController>();
+      homeController.refreshLibrary();
+    } catch (_) {}
+    
+    update();
+  }
+
   /// Open a specific PDF at a given index in the reader
   void openPdf(int index) {
     _storageService.setLastFolder(folderPath.value);
@@ -126,7 +153,11 @@ class FolderController extends GetxController {
     }
   }
 
+  @override
   Future<void> refresh() async {
     await _loadFiles();
   }
 }
+/*
+* animation in open
+* */

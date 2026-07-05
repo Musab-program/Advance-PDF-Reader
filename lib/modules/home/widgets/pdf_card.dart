@@ -36,9 +36,9 @@ class PdfCard extends StatelessWidget {
           children: [
             // ── Thumbnail ──
             ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(15),
-                bottomLeft: Radius.circular(15),
+              borderRadius: const BorderRadiusDirectional.only(
+                topStart: Radius.circular(15),
+                bottomStart: Radius.circular(15),
               ),
               child: Container(
                 width: 80,

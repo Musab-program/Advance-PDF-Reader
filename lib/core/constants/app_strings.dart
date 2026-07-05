@@ -1,6 +1,6 @@
 // lib/core/constants/app_strings.dart
 class AppStrings {
-  static const String appName = 'Continuous PDF Reader';
+  static const String appName = 'Aura PDF';
   static const String homeTitle = 'PDF Library';
   static const String readerTitle = 'PDF Viewer';
   static const String selectFolder = 'Select PDF Folder';

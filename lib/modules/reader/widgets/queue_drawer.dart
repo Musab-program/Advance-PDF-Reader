@@ -1,7 +1,6 @@
 // lib/modules/reader/widgets/queue_drawer.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:pdf_reader/core/constants/app_colors.dart';
 import 'package:pdf_reader/modules/reader/controllers/reader_controller.dart';
 
 class QueueDrawer extends GetView<ReaderController> {
@@ -9,38 +8,39 @@ class QueueDrawer extends GetView<ReaderController> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Drawer(
-      backgroundColor: AppColors.surface,
+      backgroundColor: theme.scaffoldBackgroundColor,
       child: Column(
         children: [
           // Header
           Container(
             width: double.infinity,
             padding: const EdgeInsets.only(top: 52, bottom: 20, left: 20, right: 20),
-            decoration: const BoxDecoration(
-              color: AppColors.background,
+            decoration: BoxDecoration(
+              color: theme.cardColor,
               border: Border(
-                bottom: BorderSide(color: AppColors.cardBorder, width: 0.5),
+                bottom: BorderSide(color: theme.dividerColor, width: 0.5),
               ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.playlist_play, color: AppColors.primary, size: 32),
+                Icon(Icons.playlist_play, color: theme.primaryColor, size: 32),
                 const SizedBox(height: 10),
-                const Text(
-                  'Reading Queue',
+                Text(
+                  'reading_queue'.tr,
                   style: TextStyle(
-                    color: AppColors.textPrimary,
+                    color: theme.colorScheme.onSurface,
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Obx(() => Text(
-                      '${controller.pdfQueue.length} documents',
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
+                      '${controller.pdfQueue.length} ${'documents'.tr}',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface.withOpacity(0.6),
                         fontSize: 13,
                       ),
                     )),
@@ -52,8 +52,11 @@ class QueueDrawer extends GetView<ReaderController> {
           Expanded(
             child: Obx(() {
               if (controller.pdfQueue.isEmpty) {
-                return const Center(
-                  child: Text('No documents', style: TextStyle(color: AppColors.textSecondary)),
+                return Center(
+                  child: Text(
+                    'no_documents'.tr,
+                    style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5)),
+                  ),
                 );
               }
               return ListView.builder(
@@ -72,11 +75,11 @@ class QueueDrawer extends GetView<ReaderController> {
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       decoration: BoxDecoration(
                         color: isCurrent
-                            ? AppColors.primary.withOpacity(0.12)
+                            ? theme.primaryColor.withOpacity(0.12)
                             : Colors.transparent,
                         border: isCurrent
-                            ? const Border(
-                                left: BorderSide(color: AppColors.primary, width: 3),
+                            ? Border(
+                                left: BorderSide(color: theme.primaryColor, width: 3),
                               )
                             : null,
                       ),
@@ -87,8 +90,8 @@ class QueueDrawer extends GetView<ReaderController> {
                                 ? Icons.play_circle_filled
                                 : Icons.picture_as_pdf_outlined,
                             color: isCurrent
-                                ? AppColors.primary
-                                : AppColors.textSecondary,
+                                ? theme.primaryColor
+                                : theme.colorScheme.onSurface.withOpacity(0.5),
                             size: 22,
                           ),
                           const SizedBox(width: 12),
@@ -100,8 +103,8 @@ class QueueDrawer extends GetView<ReaderController> {
                                   pdf.name,
                                   style: TextStyle(
                                     color: isCurrent
-                                        ? AppColors.textPrimary
-                                        : AppColors.textSecondary,
+                                        ? theme.colorScheme.onSurface
+                                        : theme.colorScheme.onSurface.withOpacity(0.7),
                                     fontWeight: isCurrent
                                         ? FontWeight.w600
                                         : FontWeight.normal,
@@ -114,11 +117,11 @@ class QueueDrawer extends GetView<ReaderController> {
                                   const SizedBox(height: 4),
                                   LinearProgressIndicator(
                                     value: pdf.progress,
-                                    backgroundColor: AppColors.cardBorder,
+                                    backgroundColor: theme.dividerColor,
                                     valueColor: AlwaysStoppedAnimation<Color>(
                                       isCurrent
-                                          ? AppColors.primary
-                                          : AppColors.textSecondary,
+                                          ? theme.primaryColor
+                                          : theme.colorScheme.onSurface.withOpacity(0.4),
                                     ),
                                     minHeight: 2,
                                   ),

@@ -24,9 +24,16 @@ class _SplashViewState extends State<SplashView> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF0D1B2A),
-      body: CustomSplashScreen(title: 'Continuous PDF Reader'),
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    return Scaffold(
+      backgroundColor: isDarkMode 
+          ? const Color(0xFF070E17) 
+          : const Color(0xFFF4F6F9),
+      body: const CustomSplashScreen(
+        subTitle: 'Aura PDF',
+        duration: Duration(seconds: 3), // Sync with the 3s delay
+      ),
     );
   }
 }

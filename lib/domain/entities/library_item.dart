@@ -11,6 +11,7 @@ class LibraryItem {
   final String extension;
 
   final DateTime dateModified;
+  final bool isFavorite;
 
   LibraryItem({
     required this.path,
@@ -19,6 +20,7 @@ class LibraryItem {
     this.size = 0,
     this.extension = '',
     required this.dateModified,
+    this.isFavorite = false,
   });
 
   bool get isFolder => type == LibraryItemType.folder;
@@ -31,6 +33,7 @@ class LibraryItem {
         'size': size,
         'extension': extension,
         'dateModified': dateModified.toIso8601String(),
+        'isFavorite': isFavorite,
       };
 
   factory LibraryItem.fromJson(Map<String, dynamic> json) => LibraryItem(
@@ -44,5 +47,6 @@ class LibraryItem {
         dateModified: json['dateModified'] != null
             ? DateTime.parse(json['dateModified'])
             : DateTime.now(),
+        isFavorite: json['isFavorite'] ?? false,
       );
 }

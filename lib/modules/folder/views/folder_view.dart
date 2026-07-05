@@ -1,7 +1,6 @@
 // lib/modules/folder/views/folder_view.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:pdf_reader/core/constants/app_colors.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/domain/entities/pdf_entity.dart';
 import 'package:pdf_reader/modules/folder/controllers/folder_controller.dart';
@@ -11,19 +10,22 @@ class FolderView extends GetView<FolderController> {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).primaryColor;
+    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       floatingActionButton: Obx(() {
         final lastFile = controller.lastReadFile.value;
         if (lastFile == null) return const SizedBox.shrink();
         
         return FloatingActionButton.extended(
           onPressed: controller.resumeReading,
-          backgroundColor: AppColors.primary,
+          backgroundColor: primaryColor,
           icon: const Icon(Icons.play_arrow_rounded, color: Colors.white),
-          label: const Text(
-            'Continue Reading',
-            style: TextStyle(
+          label: Text(
+            'continue_reading'.tr,
+            style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
             ),
@@ -39,22 +41,22 @@ class FolderView extends GetView<FolderController> {
             Expanded(
               child: Obx(() {
                 if (controller.isLoading.value) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: AppColors.primary),
+                  return Center(
+                    child: CircularProgressIndicator(color: primaryColor),
                   );
                 }
 
                 return RefreshIndicator(
                   onRefresh: controller.refresh,
-                  color: AppColors.primary,
+                  color: primaryColor,
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 80),
                     children: [
                       // ── File count ──
                       Text(
-                        '${controller.pdfFiles.length} PDF FILES',
-                        style: const TextStyle(
-                          color: AppColors.textSecondary,
+                        '${controller.pdfFiles.length} ${"pdf_files".tr.toUpperCase()}',
+                        style: TextStyle(
+                          color: textSecondaryColor,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 1.2,
@@ -82,13 +84,16 @@ class FolderView extends GetView<FolderController> {
   }
 
   Widget _buildAppBar(BuildContext context) {
+    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new,
-                color: AppColors.textPrimary, size: 20),
+            icon: Icon(Icons.arrow_back_ios_new,
+                color: textPrimaryColor, size: 20),
             onPressed: () => Get.back(),
           ),
           Expanded(
@@ -97,8 +102,8 @@ class FolderView extends GetView<FolderController> {
               children: [
                 Obx(() => Text(
                       controller.folderName.value,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
+                      style: TextStyle(
+                        color: textPrimaryColor,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -106,14 +111,14 @@ class FolderView extends GetView<FolderController> {
                       overflow: TextOverflow.ellipsis,
                     )),
                 const SizedBox(height: 2),
-                const Text('Folder',
+                Text('folders'.tr,
                     style: TextStyle(
-                        color: AppColors.textSecondary, fontSize: 12)),
+                        color: textSecondaryColor, fontSize: 12)),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.sort_rounded, color: AppColors.textPrimary),
+            icon: Icon(Icons.sort_rounded, color: textPrimaryColor),
             onPressed: () => _showSortOptions(context),
           ),
         ],
@@ -122,9 +127,13 @@ class FolderView extends GetView<FolderController> {
   }
 
   void _showSortOptions(BuildContext context) {
+    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final cardBg = Theme.of(context).cardColor;
+    final primaryColor = Theme.of(context).primaryColor;
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.background,
+      backgroundColor: cardBg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -137,10 +146,10 @@ class FolderView extends GetView<FolderController> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Sort Files',
+                  Text(
+                    'sort_by'.tr,
                     style: TextStyle(
-                      color: AppColors.textPrimary,
+                      color: textPrimaryColor,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
@@ -150,16 +159,16 @@ class FolderView extends GetView<FolderController> {
                       controller.isAscending.value 
                         ? Icons.arrow_upward_rounded 
                         : Icons.arrow_downward_rounded,
-                      color: AppColors.primary,
+                      color: primaryColor,
                     ),
                     onPressed: controller.toggleSortDirection,
                   )),
                 ],
               ),
               const SizedBox(height: 16),
-              _buildSortItem('name', Icons.sort_by_alpha_rounded, 'Name'),
-              _buildSortItem('date', Icons.calendar_today_rounded, 'Date Modified'),
-              _buildSortItem('size', Icons.data_usage_rounded, 'Size'),
+              _buildSortItem(context, 'name', Icons.sort_by_alpha_rounded, 'name'.tr),
+              _buildSortItem(context, 'date', Icons.calendar_today_rounded, 'date_modified'.tr),
+              _buildSortItem(context, 'size', Icons.data_usage_rounded, 'size'.tr),
             ],
           ),
         );
@@ -167,19 +176,23 @@ class FolderView extends GetView<FolderController> {
     );
   }
 
-  Widget _buildSortItem(String value, IconData icon, String label) {
+  Widget _buildSortItem(BuildContext context, String value, IconData icon, String label) {
+    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+    final primaryColor = Theme.of(context).primaryColor;
+
     return Obx(() {
       final isSelected = controller.sortOrder.value == value;
       return ListTile(
-        leading: Icon(icon, color: isSelected ? AppColors.primary : AppColors.textSecondary),
+        leading: Icon(icon, color: isSelected ? primaryColor : textSecondaryColor),
         title: Text(
           label,
           style: TextStyle(
-            color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
+            color: isSelected ? textPrimaryColor : textSecondaryColor,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
-        trailing: isSelected ? const Icon(Icons.check_circle, color: AppColors.primary) : null,
+        trailing: isSelected ? Icon(Icons.check_circle, color: primaryColor) : null,
         onTap: () {
           controller.setSortOrder(value);
           Get.back();
@@ -203,18 +216,24 @@ class _FolderPdfCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).primaryColor;
+    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
+    final cardBg = Theme.of(context).cardColor;
+    final borderCol = Theme.of(context).dividerColor;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: cardBg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: pdf.progress > 0
-                ? AppColors.primary.withOpacity(0.25)
-                : AppColors.cardBorder.withOpacity(0.4),
+                ? primaryColor.withOpacity(0.25)
+                : borderCol.withOpacity(0.4),
           ),
         ),
         child: Row(
@@ -225,20 +244,20 @@ class _FolderPdfCard extends StatelessWidget {
               height: 36,
               decoration: BoxDecoration(
                 color: pdf.progress >= 1.0
-                    ? AppColors.primary.withOpacity(0.15)
-                    : AppColors.surfaceLight,
+                    ? primaryColor.withOpacity(0.15)
+                    : borderCol.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
                 child: pdf.progress >= 1.0
-                    ? const Icon(Icons.check_rounded,
-                        color: AppColors.primary, size: 18)
+                    ? Icon(Icons.check_rounded,
+                        color: primaryColor, size: 18)
                     : Text(
                         '${index + 1}',
                         style: TextStyle(
                           color: pdf.progress > 0
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
+                              ? primaryColor
+                              : textSecondaryColor,
                           fontWeight: FontWeight.w700,
                           fontSize: 14,
                         ),
@@ -253,8 +272,8 @@ class _FolderPdfCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(pdf.name,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
+                      style: TextStyle(
+                        color: textPrimaryColor,
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                       ),
@@ -264,21 +283,21 @@ class _FolderPdfCard extends StatelessWidget {
                   Row(
                     children: [
                       Text(FileUtils.formatSize(pdf.size),
-                          style: const TextStyle(
-                              color: AppColors.textSecondary, fontSize: 11)),
+                          style: TextStyle(
+                              color: textSecondaryColor, fontSize: 11)),
                       if (pdf.pageCount > 0) ...[
                         const SizedBox(width: 6),
-                        Text('• ${pdf.pageCount} pages',
-                            style: const TextStyle(
-                                color: AppColors.textSecondary, fontSize: 11)),
+                        Text('• ${pdf.pageCount} ${"pages".tr}',
+                            style: TextStyle(
+                                color: textSecondaryColor, fontSize: 11)),
                       ],
                       const SizedBox(width: 6),
                       Text(
                         '• ${pdf.statusText}',
                         style: TextStyle(
                           color: pdf.progress > 0
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
+                              ? primaryColor
+                              : textSecondaryColor,
                           fontSize: 11,
                           fontWeight: pdf.progress > 0
                               ? FontWeight.w600
@@ -291,9 +310,8 @@ class _FolderPdfCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     LinearProgressIndicator(
                       value: pdf.progress,
-                      backgroundColor: AppColors.cardBorder,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                          AppColors.primary),
+                      backgroundColor: borderCol,
+                      valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
                       minHeight: 2,
                       borderRadius: BorderRadius.circular(1),
                     ),
@@ -303,8 +321,23 @@ class _FolderPdfCard extends StatelessWidget {
             ),
             const SizedBox(width: 8),
 
-            const Icon(Icons.chevron_right,
-                color: AppColors.textSecondary, size: 18),
+            // Favorite button
+            GetBuilder<FolderController>(
+              builder: (ctrl) {
+                final isFav = ctrl.isFavorite(pdf.path);
+                return IconButton(
+                  icon: Icon(
+                    isFav ? Icons.star_rounded : Icons.star_outline_rounded,
+                    color: isFav ? Colors.amber : textSecondaryColor.withOpacity(0.4),
+                    size: 22,
+                  ),
+                  onPressed: () => ctrl.toggleFavorite(pdf),
+                );
+              },
+            ),
+
+            Icon(Icons.chevron_right,
+                color: textSecondaryColor, size: 18),
           ],
         ),
       ),
