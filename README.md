@@ -17,8 +17,6 @@
 
   <br/>
 
-  <img src="assets/images/Splash%20Screen.png" alt="Aura PDF Splash Screen" width="320" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);" />
-
 </div>
 
 ---
