@@ -63,8 +63,11 @@ class SearchView extends GetView<sc.SearchController> {
           ),
         ),
       ),
-      body: Column(
-        children: [
+      body: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 1000),
+          child: Column(
+            children: [
           // ── Three Sorting Chips ──
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -145,8 +148,10 @@ class SearchView extends GetView<sc.SearchController> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  ),
+);
+}
 
   Widget _buildFilterChip(
     BuildContext context, {
@@ -264,38 +269,41 @@ class SearchView extends GetView<sc.SearchController> {
     final cardBg = Theme.of(context).cardColor;
 
     Get.bottomSheet(
-      Container(
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            child: Obx(() => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('sort_date'.tr, style: TextStyle(color: textPrimaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 12),
-                ...[
-                  {'key': 'all', 'label': 'all_dates'.tr},
-                  {'key': '1_day', 'label': '1_day_desc'.tr},
-                  {'key': '2_days', 'label': '2_days_desc'.tr},
-                  {'key': '1_week', 'label': '1_week_desc'.tr},
-                  {'key': '2_weeks', 'label': '2_weeks_desc'.tr},
-                ].map((opt) {
-                  final isSelected = controller.selectedDateFilter.value == opt['key'];
-                  return ListTile(
-                    title: Text(opt['label']!, style: TextStyle(color: textPrimaryColor)),
-                    trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
-                    onTap: () {
-                      controller.setDateFilter(opt['key']!);
-                      Get.back();
-                    },
-                  );
-                }),
-              ],
-            )),
+      Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 550),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              child: Obx(() => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('sort_date'.tr, style: TextStyle(color: textPrimaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  ...[
+                    {'key': 'all', 'label': 'all_dates'.tr},
+                    {'key': '1_day', 'label': '1_day_desc'.tr},
+                    {'key': '2_days', 'label': '2_days_desc'.tr},
+                    {'key': '1_week', 'label': '1_week_desc'.tr},
+                    {'key': '2_weeks', 'label': '2_weeks_desc'.tr},
+                  ].map((opt) {
+                    final isSelected = controller.selectedDateFilter.value == opt['key'];
+                    return ListTile(
+                      title: Text(opt['label']!, style: TextStyle(color: textPrimaryColor)),
+                      trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
+                      onTap: () {
+                        controller.setDateFilter(opt['key']!);
+                        Get.back();
+                      },
+                    );
+                  }),
+                ],
+              )),
+            ),
           ),
         ),
       ),
@@ -307,40 +315,43 @@ class SearchView extends GetView<sc.SearchController> {
     final cardBg = Theme.of(context).cardColor;
 
     Get.bottomSheet(
-      Container(
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            child: Obx(() => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('sort_type'.tr, style: TextStyle(color: textPrimaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 12),
-                ...[
-                  {'key': 'all', 'label': 'all_formats'.tr},
-                  {'key': 'pdf', 'label': 'PDF'},
-                  {'key': 'word', 'label': 'Word'},
-                  {'key': 'excel', 'label': 'Excel'},
-                  {'key': 'ppt', 'label': 'PPT'},
-                  {'key': 'txt', 'label': 'TXT'},
-                  {'key': 'html', 'label': 'HTML'},
-                ].map((opt) {
-                  final isSelected = controller.selectedTypeFilter.value == opt['key'];
-                  return ListTile(
-                    title: Text(opt['label']!, style: TextStyle(color: textPrimaryColor)),
-                    trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
-                    onTap: () {
-                      controller.setTypeFilter(opt['key']!);
-                      Get.back();
-                    },
-                  );
-                }),
-              ],
-            )),
+      Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 550),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              child: Obx(() => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('sort_type'.tr, style: TextStyle(color: textPrimaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  ...[
+                    {'key': 'all', 'label': 'all_formats'.tr},
+                    {'key': 'pdf', 'label': 'PDF'},
+                    {'key': 'word', 'label': 'Word'},
+                    {'key': 'excel', 'label': 'Excel'},
+                    {'key': 'ppt', 'label': 'PPT'},
+                    {'key': 'txt', 'label': 'TXT'},
+                    {'key': 'html', 'label': 'HTML'},
+                  ].map((opt) {
+                    final isSelected = controller.selectedTypeFilter.value == opt['key'];
+                    return ListTile(
+                      title: Text(opt['label']!, style: TextStyle(color: textPrimaryColor)),
+                      trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
+                      onTap: () {
+                        controller.setTypeFilter(opt['key']!);
+                        Get.back();
+                      },
+                    );
+                  }),
+                ],
+              )),
+            ),
           ),
         ),
       ),
@@ -353,38 +364,41 @@ class SearchView extends GetView<sc.SearchController> {
     final cardBg = Theme.of(context).cardColor;
 
     Get.bottomSheet(
-      Container(
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            child: Obx(() => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('sort_size'.tr, style: TextStyle(color: textPrimaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 12),
-                ...[
-                  {'key': 'all', 'label': 'all_sizes'.tr},
-                  {'key': 'under_1mb', 'label': 'under_1mb_desc'.tr},
-                  {'key': '1to10mb', 'label': '1to10mb_desc'.tr},
-                  {'key': '10to50mb', 'label': '10to50mb_desc'.tr},
-                  {'key': 'over_50mb', 'label': 'over_50mb_desc'.tr},
-                ].map((opt) {
-                  final isSelected = controller.selectedSizeFilter.value == opt['key'];
-                  return ListTile(
-                    title: Text(opt['label']!, style: TextStyle(color: textPrimaryColor)),
-                    trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
-                    onTap: () {
-                      controller.setSizeFilter(opt['key']!);
-                      Get.back();
-                    },
-                  );
-                }),
-              ],
-            )),
+      Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 550),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              child: Obx(() => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('sort_size'.tr, style: TextStyle(color: textPrimaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  ...[
+                    {'key': 'all', 'label': 'all_sizes'.tr},
+                    {'key': 'under_1mb', 'label': 'under_1mb_desc'.tr},
+                    {'key': '1to10mb', 'label': '1to10mb_desc'.tr},
+                    {'key': '10to50mb', 'label': '10to50mb_desc'.tr},
+                    {'key': 'over_50mb', 'label': 'over_50mb_desc'.tr},
+                  ].map((opt) {
+                    final isSelected = controller.selectedSizeFilter.value == opt['key'];
+                    return ListTile(
+                      title: Text(opt['label']!, style: TextStyle(color: textPrimaryColor)),
+                      trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
+                      onTap: () {
+                        controller.setSizeFilter(opt['key']!);
+                        Get.back();
+                      },
+                    );
+                  }),
+                ],
+              )),
+            ),
           ),
         ),
       ),

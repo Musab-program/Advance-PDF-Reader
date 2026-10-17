@@ -213,6 +213,13 @@ class StorageService {
     _box.write('recycled_items', jsonEncode(recycled.map((e) => e.toJson()).toList()));
   }
 
+  // ── Sort Preferences Persistence ──
+  void saveSortOrder(String order) => _box.write('sort_order', order);
+  String getSortOrder() => _box.read<String>('sort_order') ?? 'date';
+
+  void saveSortAscending(bool asc) => _box.write('sort_ascending', asc);
+  bool getSortAscending() => _box.read<bool>('sort_ascending') ?? false;
+
   void clearAll() {
     _box.erase();
   }

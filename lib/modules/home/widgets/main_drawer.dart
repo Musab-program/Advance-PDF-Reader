@@ -67,7 +67,8 @@ class MainDrawer extends StatelessWidget {
                   icon: Icons.picture_as_pdf_rounded,
                   title: 'files'.tr,
                   onTap: () {
-                    controller.currentTab.value = 0;
+                    controller.currentTab.value = 1;
+                    controller.pageController.jumpToPage(1);
                     Get.back();
                   },
                 ),
@@ -76,7 +77,8 @@ class MainDrawer extends StatelessWidget {
                   icon: Icons.folder_rounded,
                   title: 'folders'.tr,
                   onTap: () {
-                    controller.currentTab.value = 1;
+                    controller.currentTab.value = 2;
+                    controller.pageController.jumpToPage(2);
                     Get.back();
                   },
                 ),
@@ -85,7 +87,8 @@ class MainDrawer extends StatelessWidget {
                   icon: Icons.star_rounded,
                   title: 'favorites'.tr,
                   onTap: () {
-                    controller.currentTab.value = 2;
+                    controller.currentTab.value = 3;
+                    controller.pageController.jumpToPage(3);
                     Get.back();
                   },
                 ),
@@ -94,7 +97,8 @@ class MainDrawer extends StatelessWidget {
                   icon: Icons.history_rounded,
                   title: 'recents'.tr,
                   onTap: () {
-                    controller.currentTab.value = 3;
+                    controller.currentTab.value = 0;
+                    controller.pageController.jumpToPage(0);
                     controller.loadRecentItems();
                     Get.back();
                   },
@@ -127,7 +131,7 @@ class MainDrawer extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(20.0),
             child: Text(
-              'v1.0.0',
+              'v2.0.0',
               style: TextStyle(color: textSecondaryColor.withOpacity(0.5), fontSize: 12),
             ),
           ),

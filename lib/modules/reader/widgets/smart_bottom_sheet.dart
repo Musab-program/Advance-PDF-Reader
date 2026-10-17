@@ -16,18 +16,38 @@ class SmartBottomSheet extends GetView<ReaderController> {
     final extName = pdf.extension.toUpperCase().replaceAll('.', '');
     final theme = Theme.of(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.scaffoldBackgroundColor,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
+    final width = MediaQuery.of(context).size.width;
+    final isTablet = width >= 600;
+    final double systemBottom = MediaQuery.of(context).padding.bottom;
+    final double dynamicBottom = systemBottom > 24 ? systemBottom : 12.0;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () => Get.back(),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {},
+          child: Container(
+        constraints: BoxConstraints(
+          maxWidth: isTablet ? 550 : double.infinity,
         ),
-      ),
-      child: SafeArea(
+        decoration: BoxDecoration(
+          color: theme.scaffoldBackgroundColor,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+        ),
         child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 16,
+              bottom: dynamicBottom,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -250,12 +270,15 @@ class SmartBottomSheet extends GetView<ReaderController> {
               ),
               const SizedBox(height: 8),
             ],
+            ),
           ),
         ),
-      ),
-    ),
-  );
-}
+            ),
+          ),
+        ),
+      )
+    ;
+  }
 
   // ── Tab 1: View Tab Content ──
   Widget _buildViewTab(BuildContext context) {
@@ -318,66 +341,23 @@ class SmartBottomSheet extends GetView<ReaderController> {
         }),
         const SizedBox(height: 16),
 
-        // Scroll Direction and Margins
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('scroll_orientation'.tr, style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Obx(() {
-                    final isSingle = controller.isSinglePageMode.value;
-                    return Row(
-                      children: [
-                        _ModeSelectionButton(
-                          icon: Icons.unfold_more,
-                          label: 'scroll_vertical'.tr,
-                          active: !isSingle,
-                          onTap: () {
-                            if (isSingle) controller.toggleLayoutMode();
-                          },
-                        ),
-                        const SizedBox(width: 8),
-                        _ModeSelectionButton(
-                          icon: Icons.unfold_less,
-                          label: 'scroll_horizontal'.tr,
-                          active: isSingle,
-                          onTap: () {
-                            if (!isSingle) controller.toggleLayoutMode();
-                          },
-                        ),
-                      ],
-                    );
-                  }),
-                ],
+        // Crop Margins Switch
+        Obx(() => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                'crop_margins'.tr,
+                style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.bold),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('page_crop_margins'.tr, style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 12)),
-                  const SizedBox(height: 4),
-                  Obx(() => SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          'crop_margins'.tr,
-                          style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 14),
-                        ),
-                        value: controller.isCropMargins.value,
-                        activeColor: theme.primaryColor,
-                        onChanged: (val) {
-                          controller.toggleCropMargins(val);
-                        },
-                      )),
-                ],
+              subtitle: Text(
+                'page_crop_margins'.tr,
+                style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5), fontSize: 11),
               ),
-            ),
-          ],
-        ),
+              value: controller.isCropMargins.value,
+              activeColor: theme.primaryColor,
+              onChanged: (val) {
+                controller.toggleCropMargins(val);
+              },
+            )),
         const SizedBox(height: 8),
 
         // Manga Mode Switch
@@ -638,63 +618,6 @@ class _ThemeSelectorPill extends StatelessWidget {
   }
 }
 
-class _ModeSelectionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _ModeSelectionButton({
-    required this.icon,
-    required this.label,
-    required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-          decoration: BoxDecoration(
-            color: active ? theme.primaryColor.withOpacity(0.15) : theme.cardColor,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: active ? theme.primaryColor : Colors.transparent,
-              width: 1,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                color: active ? theme.primaryColor : theme.colorScheme.onSurface.withOpacity(0.6),
-                size: 16,
-              ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: active ? theme.primaryColor : theme.colorScheme.onSurface.withOpacity(0.6),
-                    fontWeight: active ? FontWeight.bold : FontWeight.normal,
-                    fontSize: 12,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _ToolTile extends StatelessWidget {
   final IconData icon;

@@ -29,9 +29,12 @@ class AboutView extends GetView<SettingsController> {
         ),
         centerTitle: true,
       ),
-      body: Column(
-        children: [
-          const SizedBox(height: 40),
+      body: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: Column(
+            children: [
+              const SizedBox(height: 40),
           
           // ── Centered Logo section ──
           Center(
@@ -58,7 +61,7 @@ class AboutView extends GetView<SettingsController> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '1.0.0 (Premium)\nFlutter Version',
+                  '2.0.0 (Premium)\nFlutter Version',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: textSecondaryColor,
@@ -130,7 +133,9 @@ class AboutView extends GetView<SettingsController> {
               ],
             ),
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -185,7 +190,7 @@ class AboutView extends GetView<SettingsController> {
           style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.bold),
         ),
         content: SizedBox(
-          width: double.maxFinite,
+          width: 450,
           child: SingleChildScrollView(
             child: Text(
               'privacy_policy_text'.tr,
@@ -217,7 +222,7 @@ class AboutView extends GetView<SettingsController> {
           style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.bold),
         ),
         content: SizedBox(
-          width: double.maxFinite,
+          width: 450,
           child: SingleChildScrollView(
             child: Text(
               'Aura PDF is built using Flutter and the following open-source libraries:\n\n'
