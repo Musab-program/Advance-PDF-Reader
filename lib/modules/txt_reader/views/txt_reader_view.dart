@@ -49,26 +49,31 @@ class TxtReaderView extends GetView<TxtReaderController> {
         ],
       ),
       body: SafeArea(
-        child: Obx(() {
-          if (controller.isLoading.value) {
-            return Center(
-              child: CircularProgressIndicator(color: primaryColor),
-            );
-          }
+        child: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: Obx(() {
+              if (controller.isLoading.value) {
+                return Center(
+                  child: CircularProgressIndicator(color: primaryColor),
+                );
+              }
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: SelectableText(
-              controller.textContent.value,
-              style: TextStyle(
-                color: textPrimaryColor,
-                fontSize: controller.fontSize.value,
-                height: 1.6,
-                fontFamily: 'Roboto', // Simple clean readable sans-serif
-              ),
-            ),
-          );
-        }),
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: SelectableText(
+                  controller.textContent.value,
+                  style: TextStyle(
+                    color: textPrimaryColor,
+                    fontSize: controller.fontSize.value,
+                    height: 1.6,
+                    fontFamily: 'Roboto', // Simple clean readable sans-serif
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
       ),
     );
   }

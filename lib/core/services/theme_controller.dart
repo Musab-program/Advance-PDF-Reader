@@ -23,7 +23,6 @@ class ThemeController extends GetxController {
     _storageService.saveFontFamily(family);
     _storageService.saveFontSizeScale(scale);
     
-    // Refresh GetX theme config
     final savedTheme = _storageService.getThemeMode();
     ThemeMode getxMode;
     if (savedTheme == 'dark') {
@@ -34,8 +33,10 @@ class ThemeController extends GetxController {
       getxMode = ThemeMode.system;
     }
     
+    // Update theme without rebuilding the entire widget tree.
+    // Get.forceAppUpdate() was intentionally removed — it caused GetMaterialApp
+    // to fully rebuild which duplicated the Navigator GlobalKey and crashed.
     Get.changeTheme(AppThemes.getTheme(isDark: Get.isDarkMode, fontFamily: family, fontScale: scale));
     Get.changeThemeMode(getxMode);
-    Get.forceAppUpdate();
   }
 }

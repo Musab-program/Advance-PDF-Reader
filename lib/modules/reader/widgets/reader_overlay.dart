@@ -26,7 +26,7 @@ class ReaderOverlay extends GetView<ReaderController> {
                     Obx(() {
                       final isSearch = controller.isSearchMode.value;
                       return Container(
-                        padding: const EdgeInsets.only(top: 36, left: 4, right: 4, bottom: 12),
+                        padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 8, left: 4, right: 4, bottom: 12),
                         decoration: const BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
@@ -176,9 +176,9 @@ class ReaderOverlay extends GetView<ReaderController> {
                       );
                     }),
 
-                    // ─── Bottom Controls (Untouched) ─────────────────────────
+                    // ─── Bottom Controls ─────────────────────────
                     Container(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                      padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.bottomCenter,
@@ -237,7 +237,7 @@ class ReaderOverlay extends GetView<ReaderController> {
 
                 // ─── Floating Kindle-style Page Indicator ────────────────────
                 Positioned(
-                  bottom: 105,
+                  bottom: MediaQuery.of(context).padding.bottom + 85,
                   left: 0,
                   right: 0,
                   child: Center(

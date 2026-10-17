@@ -68,8 +68,8 @@ class QueueDrawer extends GetView<ReaderController> {
 
                   return InkWell(
                     onTap: () {
+                      Scaffold.of(context).closeDrawer();
                       controller.jumpToFile(index);
-                      Navigator.pop(context);
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

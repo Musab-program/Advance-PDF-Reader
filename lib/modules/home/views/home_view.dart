@@ -5,6 +5,7 @@ import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/domain/entities/library_item.dart';
 import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
 import 'package:pdf_reader/modules/home/widgets/main_drawer.dart';
+import 'package:pdf_reader/modules/home/widgets/selection_details_sheet.dart';
 import 'package:pdf_reader/routes/app_routes.dart';
 
 class HomeView extends GetView<HomeController> {
@@ -14,107 +15,173 @@ class HomeView extends GetView<HomeController> {
   Widget build(BuildContext context) {
     final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
 
-    return Scaffold(
-      key: scaffoldKey,
-      drawer: const MainDrawer(),
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Obx(() {
-              if (controller.isSelectionMode.value) {
-                return _buildSelectionBar(context);
-              } else {
-                return _buildUnifiedSearchBar(context, scaffoldKey);
-              }
-            }),
-            Expanded(
-              child: PageView(
-                controller: controller.pageController,
-                onPageChanged: (index) {
-                  controller.currentTab.value = index;
-                  if (index == 0) {
-                    controller.loadRecentItems();
-                  }
-                },
+    // Force synchronization of PageView scroll position with the current tab state on every layout rebuild
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (controller.pageController.hasClients) {
+        final currentPage = controller.pageController.page?.round();
+        if (currentPage != controller.currentTab.value) {
+          controller.pageController.jumpToPage(controller.currentTab.value);
+        }
+      }
+    });
+
+    return Obx(() => PopScope(
+      canPop: !controller.isSelectionMode.value,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (controller.isSelectionMode.value) {
+          controller.clearSelection();
+        }
+      },
+      child: Scaffold(
+        key: scaffoldKey,
+        drawer: const MainDrawer(),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: SafeArea(
+          child: Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 1000),
+              child: Column(
                 children: [
-                  _buildRecentsTab(context),
-                  _buildFilesTab(context),
-                  _buildFoldersTab(context),
-                  _buildFavoritesTab(context),
-                  _buildToolsTab(context),
+              Obx(() {
+                if (controller.isSelectionMode.value) {
+                  return _buildSelectionBar(context);
+                } else {
+                  return _buildUnifiedSearchBar(context, scaffoldKey);
+                }
+              }),
+              Expanded(
+                child: PageView(
+                  key: const PageStorageKey('home_page_view'),
+                  controller: controller.pageController,
+                  onPageChanged: (index) {
+                    controller.currentTab.value = index;
+                    if (index == 0) {
+                      controller.loadRecentItems();
+                    }
+                  },
+                  children: [
+                    _buildRecentsTab(context),
+                    _buildFilesTab(context),
+                    _buildFoldersTab(context),
+                    _buildFavoritesTab(context),
+                    _buildToolsTab(context),
+                  ],
+                ),
+              ),
                 ],
               ),
             ),
-          ],
+          ),
         ),
+        bottomNavigationBar: Obx(() {
+          if (controller.isSelectionMode.value) {
+            return _buildBottomSelectionPanel(context);
+          } else {
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final cardBg = Theme.of(context).cardColor;
+            
+            return SafeArea(
+              top: false,
+              child: Center(
+                heightFactor: 1.0,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 550),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF22304D) : const Color(0xFFE2E8F0),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(isDark ? 0.25 : 0.08),
+                          blurRadius: 20,
+                          offset: const Offset(0, 6),
+                        )
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Theme(
+                      data: Theme.of(context).copyWith(
+                        splashColor: Colors.transparent,
+                        highlightColor: Colors.transparent,
+                        hoverColor: Colors.transparent,
+                        canvasColor: Colors.transparent,
+                      ),
+                      child: BottomNavigationBar(
+                        currentIndex: controller.currentTab.value,
+                        backgroundColor: Colors.transparent,
+                        elevation: 0,
+                        selectedItemColor: Theme.of(context).primaryColor,
+                        unselectedItemColor: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                        unselectedLabelStyle: const TextStyle(fontSize: 11),
+                        onTap: (index) {
+                          controller.currentTab.value = index;
+                          controller.pageController.jumpToPage(index);
+                          if (index == 0) {
+                            controller.loadRecentItems();
+                          }
+                        },
+                        type: BottomNavigationBarType.fixed,
+                        items: [
+                          BottomNavigationBarItem(
+                            icon: const Icon(Icons.history_rounded),
+                            label: 'recents'.tr,
+                          ),
+                          BottomNavigationBarItem(
+                            icon: const Icon(Icons.picture_as_pdf_rounded),
+                            label: 'files'.tr,
+                          ),
+                          BottomNavigationBarItem(
+                            icon: const Icon(Icons.folder_rounded),
+                            label: 'folders'.tr,
+                          ),
+                          BottomNavigationBarItem(
+                            icon: const Icon(Icons.star_rounded),
+                            label: 'favorites'.tr,
+                          ),
+                          BottomNavigationBarItem(
+                            icon: const Icon(Icons.handyman_rounded),
+                            label: 'tools'.tr,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+        }),
+        floatingActionButton: Obx(() {
+          final tab = controller.currentTab.value;
+          final isSelection = controller.isSelectionMode.value;
+          if (isSelection) return const SizedBox.shrink();
+          
+          if (tab == 1) {
+            return FloatingActionButton(
+              heroTag: 'add_file_fab',
+              onPressed: controller.pickPdfFile,
+              backgroundColor: Theme.of(context).primaryColor,
+              child: const Icon(Icons.add_to_photos_rounded, color: Colors.white),
+            );
+          } else if (tab == 2) {
+            return FloatingActionButton(
+              heroTag: 'add_folder_fab',
+              onPressed: controller.pickFolder,
+              backgroundColor: Theme.of(context).primaryColor,
+              child: const Icon(Icons.create_new_folder_rounded, color: Colors.white),
+            );
+          }
+          return const SizedBox.shrink();
+        }),
       ),
-      bottomNavigationBar: Obx(() {
-        if (controller.isSelectionMode.value) {
-          return _buildBottomSelectionPanel(context);
-        } else {
-          return BottomNavigationBar(
-            currentIndex: controller.currentTab.value,
-            onTap: (index) {
-              controller.currentTab.value = index;
-              controller.pageController.animateToPage(
-                index,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-              if (index == 0) {
-                controller.loadRecentItems();
-              }
-            },
-            type: BottomNavigationBarType.fixed,
-            items: [
-              BottomNavigationBarItem(
-                icon: const Icon(Icons.history_rounded),
-                label: 'recents'.tr,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(Icons.picture_as_pdf_rounded),
-                label: 'files'.tr,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(Icons.folder_rounded),
-                label: 'folders'.tr,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(Icons.star_rounded),
-                label: 'favorites'.tr,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(Icons.handyman_rounded),
-                label: 'tools'.tr,
-              ),
-            ],
-          );
-        }
-      }),
-      floatingActionButton: Obx(() {
-        final tab = controller.currentTab.value;
-        final isSelection = controller.isSelectionMode.value;
-        if (isSelection) return const SizedBox.shrink();
-        
-        if (tab == 1) {
-          return FloatingActionButton(
-            heroTag: 'add_file_fab',
-            onPressed: controller.pickPdfFile,
-            backgroundColor: Theme.of(context).primaryColor,
-            child: const Icon(Icons.add_to_photos_rounded, color: Colors.white),
-          );
-        } else if (tab == 2) {
-          return FloatingActionButton(
-            heroTag: 'add_folder_fab',
-            onPressed: controller.pickFolder,
-            backgroundColor: Theme.of(context).primaryColor,
-            child: const Icon(Icons.create_new_folder_rounded, color: Colors.white),
-          );
-        }
-        return const SizedBox.shrink();
-      }),
-    );
+    ));
   }
 
   Widget _buildFilesTab(BuildContext context) {
@@ -263,6 +330,7 @@ class HomeView extends GetView<HomeController> {
             );
           },
         ),
+        const SizedBox(height: 100),
       ],
     );
   }
@@ -319,8 +387,9 @@ class HomeView extends GetView<HomeController> {
       {'key': 'OTHERS', 'label': 'others'.tr, 'icon': Icons.article_rounded, 'color': Colors.deepPurpleAccent}, // Others Purple
     ];
 
-    final width = MediaQuery.of(context).size.width;
-    final itemWidth = (width - 32 - 24) / 4; // Padding (16*2) + Spacing (8*3) for 4 columns
+    final width = MediaQuery.of(context).size.width.clamp(0.0, 1000.0);
+    final int cols = width > 800 ? 8 : (width > 450 ? 6 : 4);
+    final itemWidth = (width - 32 - (8 * (cols - 1))) / cols;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -377,12 +446,15 @@ class HomeView extends GetView<HomeController> {
   }
 
   Widget _buildItemsList(BuildContext context, List<LibraryItem> items) {
+    final width = MediaQuery.of(context).size.width;
+    final int crossAxisCount = width > 900 ? 5 : (width > 600 ? 3 : 2);
+
     return Obx(() {
       if (controller.isGridView.value) {
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
             childAspectRatio: 0.88,
@@ -581,58 +653,97 @@ class HomeView extends GetView<HomeController> {
     final cardBg = Theme.of(context).cardColor;
     final primaryColor = Theme.of(context).primaryColor;
     final borderCol = Theme.of(context).dividerColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: cardBg,
-        border: Border(
-          top: BorderSide(color: borderCol.withOpacity(0.6), width: 1.0),
-        ),
-      ),
-      child: SafeArea(
-        child: Container(
-          height: 80,
-          alignment: Alignment.center,
-          child: Row(
-            children: [
-              // Share
-              Expanded(
-                child: InkWell(
-                  onTap: controller.shareSelected,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.share_rounded, color: primaryColor, size: 26),
-                      const SizedBox(height: 6),
-                      Text(
-                        'share'.tr,
-                        style: TextStyle(color: primaryColor, fontSize: 13, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
+    return SafeArea(
+      top: false,
+      child: Center(
+        heightFactor: 1.0,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 550),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: isDark ? const Color(0xFF22304D) : const Color(0xFFE2E8F0),
+                width: 1,
               ),
-              
-              VerticalDivider(color: borderCol.withOpacity(0.6), width: 1, indent: 15, endIndent: 15),
-              
-              // Delete
-              Expanded(
-                child: InkWell(
-                  onTap: () => _confirmBulkDelete(context),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 26),
-                      const SizedBox(height: 6),
-                      Text(
-                        'remove_title'.tr,
-                        style: const TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(isDark ? 0.25 : 0.08),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                )
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Container(
+              height: 56,
+              alignment: Alignment.center,
+              child: Row(
+                children: [
+                  // Share
+                  Expanded(
+                    child: InkWell(
+                      onTap: controller.shareSelected,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.share_rounded, color: primaryColor, size: 20),
+                          const SizedBox(height: 2),
+                          Text(
+                            'share'.tr,
+                            style: TextStyle(color: primaryColor, fontSize: 10, fontWeight: FontWeight.w600),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                  
+                  VerticalDivider(color: borderCol.withOpacity(0.6), width: 1, indent: 10, endIndent: 10),
+                  
+                  // Details
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => showSelectionDetailsSheet(context, controller.selectedPaths.toList()),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: primaryColor, size: 20),
+                          const SizedBox(height: 2),
+                          Text(
+                            'details'.tr,
+                            style: TextStyle(color: primaryColor, fontSize: 10, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  
+                  VerticalDivider(color: borderCol.withOpacity(0.6), width: 1, indent: 10, endIndent: 10),
+                  
+                  // Delete
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _confirmBulkDelete(context),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 20),
+                          const SizedBox(height: 2),
+                          Text(
+                            'remove_title'.tr,
+                            style: const TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -648,6 +759,7 @@ class HomeView extends GetView<HomeController> {
       Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(24),
@@ -762,6 +874,7 @@ class HomeView extends GetView<HomeController> {
       Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(24),
@@ -879,10 +992,18 @@ class HomeView extends GetView<HomeController> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => SafeArea(
-        child: SingleChildScrollView(
+      builder: (context) {
+        final double systemBottom = MediaQuery.of(context).padding.bottom;
+        final double dynamicBottom = systemBottom > 24 ? systemBottom : 12.0;
+
+        return SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            padding: EdgeInsets.only(
+              top: 16,
+              left: 20,
+              right: 20,
+              bottom: dynamicBottom,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -904,38 +1025,101 @@ class HomeView extends GetView<HomeController> {
                 Row(
                   children: [
                     Expanded(
-                      child: Obx(() => ChoiceChip(
-                        label: Text('view_list'.tr, style: const TextStyle(fontSize: 12)),
-                        selected: !controller.isGridView.value,
-                        onSelected: (selected) {
-                          if (selected) controller.toggleLayoutMode(false);
-                        },
-                        avatar: const Icon(Icons.view_list_rounded, size: 18),
-                      )),
+                      child: Obx(() {
+                        final isSelected = !controller.isGridView.value;
+                        return InkWell(
+                          onTap: () => controller.toggleLayoutMode(false),
+                          borderRadius: BorderRadius.circular(12),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: isSelected ? Theme.of(context).primaryColor : Theme.of(context).cardColor,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected ? Theme.of(context).primaryColor : Theme.of(context).dividerColor.withOpacity(0.5),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.view_list_rounded,
+                                  size: 18,
+                                  color: isSelected ? Colors.white : textPrimaryColor,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'view_list'.tr,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isSelected ? Colors.white : textPrimaryColor,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Obx(() => ChoiceChip(
-                        label: Text('view_grid'.tr, style: const TextStyle(fontSize: 12)),
-                        selected: controller.isGridView.value,
-                        onSelected: (selected) {
-                          if (selected) controller.toggleLayoutMode(true);
-                        },
-                        avatar: const Icon(Icons.grid_view_rounded, size: 18),
-                      )),
+                      child: Obx(() {
+                        final isSelected = controller.isGridView.value;
+                        return InkWell(
+                          onTap: () => controller.toggleLayoutMode(true),
+                          borderRadius: BorderRadius.circular(12),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: isSelected ? Theme.of(context).primaryColor : Theme.of(context).cardColor,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected ? Theme.of(context).primaryColor : Theme.of(context).dividerColor.withOpacity(0.5),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.grid_view_rounded,
+                                  size: 18,
+                                  color: isSelected ? Colors.white : textPrimaryColor,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'view_grid'.tr,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isSelected ? Colors.white : textPrimaryColor,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
                     ),
                   ],
                 ),
-                const Divider(height: 24),
+                const SizedBox(height: 24),
+                
+                Divider(color: Theme.of(context).dividerColor.withOpacity(0.6), height: 1),
+                const SizedBox(height: 20),
 
+                // ── Sorting ──
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('sort_by'.tr,
-                        style: TextStyle(
-                            color: textPrimaryColor,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      'sort_by'.tr,
+                      style: TextStyle(color: textPrimaryColor, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
                     Obx(() => IconButton(
                       icon: Icon(
                         controller.isAscending.value 
@@ -943,11 +1127,12 @@ class HomeView extends GetView<HomeController> {
                           : Icons.arrow_downward_rounded,
                         color: Theme.of(context).primaryColor,
                       ),
-                      onPressed: () => controller.toggleSortDirection(),
+                      onPressed: controller.toggleSortDirection,
                     )),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                
                 Obx(() => _SortOption(
                   title: 'name'.tr,
                   icon: Icons.sort_by_alpha_rounded,
@@ -976,8 +1161,8 @@ class HomeView extends GetView<HomeController> {
               ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -1048,8 +1233,10 @@ class _LibraryListCard extends StatelessWidget {
         ? _FileIconInfo(Icons.folder_rounded, primaryColor)
         : _getFileIconInfo(item.extension, primaryColor);
 
+    final rxSelected = controller.getRxSelected(item.path);
+
     return Obx(() {
-      final isSelected = controller.isSelected(item.path);
+      final isSelected = rxSelected.value;
       final isSelectionMode = controller.isSelectionMode.value;
 
       return GestureDetector(
@@ -1113,13 +1300,63 @@ class _LibraryListCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(item.name,
-                          style: TextStyle(
-                              color: textPrimaryColor,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(item.name,
+                                style: TextStyle(
+                                    color: textPrimaryColor,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                          if (!item.isFolder) ...[
+                            if (progress == null || progress == 0) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'unread'.tr,
+                                  style: const TextStyle(
+                                    color: Colors.blue,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ] else if (progress != null && progress! >= 1.0) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.check_circle_rounded, color: Colors.green, size: 10),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      'completed'.tr,
+                                      style: const TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ],
+                      ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
@@ -1230,8 +1467,10 @@ class _LibraryGridCard extends StatelessWidget {
         ? _FileIconInfo(Icons.folder_rounded, primaryColor)
         : _getFileIconInfo(item.extension, primaryColor);
 
+    final rxSelected = controller.getRxSelected(item.path);
+
     return Obx(() {
-      final isSelected = controller.isSelected(item.path);
+      final isSelected = rxSelected.value;
       final isSelectionMode = controller.isSelectionMode.value;
 
       return GestureDetector(

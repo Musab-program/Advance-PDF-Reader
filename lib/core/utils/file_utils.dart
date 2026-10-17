@@ -199,4 +199,71 @@ class FileUtils {
     }
     return '${size.toStringAsFixed(1)} ${suffixes[i]}';
   }
+
+  /// Compares two strings using natural/alphanumeric sort order.
+  /// Iteratively strips brackets/parentheses to isolate core chapter/page numbers.
+  /// If [folderName] is provided, it extracts its numbers and filters them out from the files' numbers to ignore folder noise.
+  /// If numbers are equal or missing, it falls back to standard alphabetical comparison.
+  static int naturalCompare(String a, String b, {String? folderName}) {
+    final Set<BigInt> folderNumbers = {};
+    if (folderName != null && folderName.isNotEmpty) {
+      final digitRegex = RegExp(r'\d+');
+      for (final match in digitRegex.allMatches(folderName)) {
+        final val = BigInt.tryParse(match.group(0)!);
+        if (val != null) {
+          folderNumbers.add(val);
+        }
+      }
+    }
+
+    List<BigInt> getSortNumbers(String s) {
+      final digitRegex = RegExp(r'\d+');
+      final bracketsRegex = RegExp(r'\[[^\]]*\]|\([^)]*\)|\{[^}]*\}');
+
+      String cleaned = s;
+      while (true) {
+        final matches = bracketsRegex.allMatches(cleaned).toList();
+        bool removedAny = false;
+        for (final match in matches) {
+          final testString = cleaned.substring(0, match.start) + cleaned.substring(match.end);
+          if (digitRegex.hasMatch(testString)) {
+            cleaned = testString;
+            removedAny = true;
+            break;
+          }
+        }
+        if (!removedAny) break;
+      }
+
+      final digitMatches = digitRegex.allMatches(cleaned);
+      final List<BigInt> extracted = digitMatches
+          .map((m) => BigInt.tryParse(m.group(0)!) ?? BigInt.zero)
+          .toList();
+
+      if (folderNumbers.isNotEmpty && extracted.length > 1) {
+        final filtered = extracted.where((n) => !folderNumbers.contains(n)).toList();
+        if (filtered.isNotEmpty) {
+          return filtered;
+        }
+      }
+
+      return extracted;
+    }
+
+    final numsA = getSortNumbers(a);
+    final numsB = getSortNumbers(b);
+
+    if (numsA.isNotEmpty && numsB.isNotEmpty) {
+      final minLen = numsA.length < numsB.length ? numsA.length : numsB.length;
+      for (int i = 0; i < minLen; i++) {
+        final cmp = numsA[i].compareTo(numsB[i]);
+        if (cmp != 0) return cmp;
+      }
+      final lenCmp = numsA.length.compareTo(numsB.length);
+      if (lenCmp != 0) return lenCmp;
+    }
+
+    // Fallback to standard alphabetical comparison
+    return a.toLowerCase().compareTo(b.toLowerCase());
+  }
 }

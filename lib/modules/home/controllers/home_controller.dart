@@ -36,12 +36,15 @@ class HomeController extends GetxController {
   // Selection Mode States
   final RxBool isSelectionMode = false.obs;
   final RxSet<String> selectedPaths = <String>{}.obs;
+  final Map<String, RxBool> selectedStatus = {};
 
   final TextEditingController searchController = TextEditingController();
 
   @override
   void onInit() {
     super.onInit();
+    sortOrder.value = _storageService.getSortOrder();
+    isAscending.value = _storageService.getSortAscending();
     isGridView.value = _storageService.getLayoutMode();
     pageController = PageController(initialPage: currentTab.value);
     _loadLibrary();
@@ -104,26 +107,34 @@ class HomeController extends GetxController {
     }
   }
 
+  RxBool getRxSelected(String path) {
+    if (!selectedStatus.containsKey(path)) {
+      selectedStatus[path] = (selectedPaths.contains(path)).obs;
+    }
+    return selectedStatus[path]!;
+  }
+
   // Selection Actions
   void toggleSelection(String path) {
-    if (selectedPaths.contains(path)) {
-      selectedPaths.remove(path);
-      if (selectedPaths.isEmpty) {
-        isSelectionMode.value = false;
-      }
-    } else {
+    final status = getRxSelected(path);
+    status.value = !status.value;
+    
+    if (status.value) {
       selectedPaths.add(path);
       isSelectionMode.value = true;
+    } else {
+      selectedPaths.remove(path);
     }
-    update();
   }
 
   bool isSelected(String path) => selectedPaths.contains(path);
 
   void clearSelection() {
+    for (final path in selectedPaths) {
+      selectedStatus[path]?.value = false;
+    }
     selectedPaths.clear();
     isSelectionMode.value = false;
-    update();
   }
 
   void selectAll() {
@@ -139,13 +150,16 @@ class HomeController extends GetxController {
     }
 
     if (allSelected) {
-      clearSelection();
+      for (final item in activeItems) {
+        selectedPaths.remove(item.path);
+        getRxSelected(item.path).value = false;
+      }
     } else {
       for (final item in activeItems) {
         selectedPaths.add(item.path);
+        getRxSelected(item.path).value = true;
       }
       isSelectionMode.value = true;
-      update();
     }
   }
 
@@ -311,7 +325,7 @@ class HomeController extends GetxController {
       int cmp = 0;
       switch (sortOrder.value) {
         case 'name':
-          cmp = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          cmp = FileUtils.naturalCompare(a.name, b.name);
           break;
         case 'date':
           cmp = a.dateModified.compareTo(b.dateModified);
@@ -322,7 +336,7 @@ class HomeController extends GetxController {
         case 'type':
           if (a.isFolder && !b.isFolder) cmp = -1;
           else if (!a.isFolder && b.isFolder) cmp = 1;
-          else cmp = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          else cmp = FileUtils.naturalCompare(a.name, b.name);
           break;
       }
       return isAscending.value ? cmp : -cmp;
@@ -383,7 +397,7 @@ class HomeController extends GetxController {
       int cmp = 0;
       switch (sortOrder.value) {
         case 'name':
-          cmp = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          cmp = FileUtils.naturalCompare(a.name, b.name);
           break;
         case 'date':
           cmp = a.dateModified.compareTo(b.dateModified);
@@ -404,11 +418,13 @@ class HomeController extends GetxController {
 
   void setSortOrder(String order) {
     sortOrder.value = order;
+    _storageService.saveSortOrder(order);
     _filterLibrary();
   }
 
   void toggleSortDirection() {
     isAscending.value = !isAscending.value;
+    _storageService.saveSortAscending(isAscending.value);
     _filterLibrary();
   }
 
@@ -493,7 +509,17 @@ class HomeController extends GetxController {
             }
           } catch (_) {}
           
-          final libItem = libraryItems.firstWhereOrNull((e) => e.path == path);
+          DateTime dateRead = DateTime.now();
+          if (item['date'] != null) {
+            try {
+              dateRead = DateTime.parse(item['date'] as String);
+            } catch (_) {
+              dateRead = file.existsSync() ? file.lastModifiedSync() : DateTime.now();
+            }
+          } else {
+            dateRead = file.existsSync() ? file.lastModifiedSync() : DateTime.now();
+          }
+
           final ext = p.extension(path).replaceAll('.', '').toUpperCase();
           return LibraryItem(
             path: path,
@@ -501,11 +527,32 @@ class HomeController extends GetxController {
             type: LibraryItemType.file,
             size: size,
             extension: ext.isNotEmpty ? ext : 'PDF',
-            dateModified: libItem?.dateModified ?? file.lastModifiedSync(),
+            dateModified: dateRead,
             isFavorite: _storageService.isFavorite(path),
           );
         })
         .toList();
+
+    // Apply sorting to recent files
+    list.sort((a, b) {
+      int cmp = 0;
+      switch (sortOrder.value) {
+        case 'name':
+          cmp = FileUtils.naturalCompare(a.name, b.name);
+          break;
+        case 'date':
+          cmp = a.dateModified.compareTo(b.dateModified);
+          break;
+        case 'size':
+          cmp = a.size.compareTo(b.size);
+          break;
+        default:
+          cmp = b.dateModified.compareTo(a.dateModified);
+          break;
+      }
+      return isAscending.value ? cmp : -cmp;
+    });
+
     recentItems.assignAll(list);
   }
 

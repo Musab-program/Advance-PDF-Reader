@@ -174,6 +174,10 @@ class AppTranslations extends Translations {
           'rotate_screen': 'Rotate Screen',
           'manga_mode': 'Manga Mode',
           'manga_mode_desc': 'Removes spacing and gaps between pages',
+          'last_read': 'Last Read',
+          'unread': 'Unread',
+          'completed': 'Completed',
+          'reading': 'Reading',
         },
         'ar': {
           'app_name': 'Aura PDF',
@@ -346,6 +350,10 @@ class AppTranslations extends Translations {
           'rotate_screen': 'تدوير الشاشة',
           'manga_mode': 'وضع المانجا',
           'manga_mode_desc': 'إزالة الفواصل والمسافات بين الصفحات',
+          'last_read': 'آخر ما قرأت',
+          'unread': 'غير مقروء',
+          'completed': 'مكتمل',
+          'reading': 'قيد القراءة',
         }
       };
 }

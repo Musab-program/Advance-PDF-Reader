@@ -45,14 +45,26 @@ class ReaderView extends GetView<ReaderController> {
 
           final pdf = ctrl.currentPdf!;
 
+          final view = View.of(context);
+          final double screenWidth = view.physicalSize.width > 0
+              ? view.physicalSize.width / view.devicePixelRatio
+              : MediaQuery.of(context).size.width;
+          final double screenHeight = view.physicalSize.height > 0
+              ? view.physicalSize.height / view.devicePixelRatio
+              : MediaQuery.of(context).size.height;
+
           return Stack(
             children: [
               // ── PDF Viewer ──
               // GestureDetector handles tap-for-overlay.
               GestureDetector(
-                onTap: ctrl.toggleOverlay,
                 behavior: HitTestBehavior.translucent,
-                  child: Obx(() {
+                onTap: ctrl.toggleOverlay,
+                onDoubleTapDown: (details) {
+                  ctrl.handleDoubleTapZoom(details.localPosition, Size(screenWidth, screenHeight));
+                },
+                onDoubleTap: () {},
+                child: Obx(() {
                   // Fallback to identity matrix filter to ensure ColorFiltered wrapper is ALWAYS present.
                   // This keeps the widget tree type structure identical and prevents Flutter from destroying
                   // the PdfViewer state and resetting the page position when switching themes.
@@ -63,13 +75,55 @@ class ReaderView extends GetView<ReaderController> {
                     0, 0, 0, 1, 0,
                   ]);
 
-                  return ColorFiltered(
-                    colorFilter: filter,
-                    child: PdfViewer.file(
+                  return OverflowBox(
+                    minWidth: screenWidth,
+                    maxWidth: screenWidth,
+                    minHeight: screenHeight,
+                    maxHeight: screenHeight,
+                    alignment: Alignment.topCenter,
+                    child: ColorFiltered(
+                      colorFilter: filter,
+                      child: PdfViewer.file(
                       pdf.path,
-                      key: ValueKey('${pdf.path}_${ctrl.isSinglePageMode.value}'),
+                      key: ValueKey(pdf.path),
                       controller: ctrl.pdfViewerController,
+                      initialPageNumber: ctrl.getInitialPage(pdf.path),
                       params: PdfViewerParams(
+                        interactionEndFrictionCoefficient: 0.001,
+                        verticalCacheExtent: 3.5,
+                        horizontalCacheExtent: 3.5,
+                        onInteractionStart: ctrl.handleInteractionStart,
+                        onInteractionEnd: ctrl.handleInteractionEnd,
+                        // ── Custom Matrix Normalization / Position Preservation ──
+                        normalizeMatrix: (newValue, viewSize, layout, controller) {
+                          if (ctrl.isRestoringPosition) {
+                            final corrected = ctrl.getCorrectedMatrixForLayout(layout, viewSize);
+                            if (corrected != null) {
+                              return corrected;
+                            }
+                          }
+                          
+                          // Restrict matrix to safe range to prevent horizontal/vertical panning drift
+                          final position = newValue.calcPosition(viewSize);
+                          final newZoom = max(newValue.zoom, 0.1);
+                          final hw = viewSize.width / 2 / newZoom;
+                          final hh = viewSize.height / 2 / newZoom;
+                          
+                          final minX = hw;
+                          final maxX = layout.documentSize.width - hw;
+                          final double x = minX < maxX ? position.dx.clamp(minX, maxX) : (minX + maxX) / 2;
+                          
+                          final minY = hh;
+                          final maxY = layout.documentSize.height - hh;
+                          final double doubleY = minY < maxY ? position.dy.clamp(minY, maxY) : (minY + maxY) / 2;
+
+                          return controller!.calcMatrixFor(
+                            Offset(x, doubleY),
+                            zoom: newZoom,
+                            viewSize: viewSize,
+                          );
+                        },
+
                         // ── Background color ──
                         backgroundColor: ctrl.themeBackgroundColor,
 
@@ -94,9 +148,9 @@ class ReaderView extends GetView<ReaderController> {
                         ],
 
                         // ── Continuous vertical / Horizontal page layout ──
-                        layoutPages: ctrl.isSinglePageMode.value
-                            ? _buildHorizontalLayout
-                            : _buildVerticalLayout,
+                        layoutPages: _buildVerticalLayout, //
+//
+//
 
                         // ── Page change callback ──
                         onPageChanged: (int? pageNumber) {
@@ -118,14 +172,28 @@ class ReaderView extends GetView<ReaderController> {
 
                         // ── Rendering scale ──
                         getPageRenderingScale: (context, page, controller, estimatedScale) {
-                          final devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
-                          // If it is a small file (likely text-heavy), render it at a slightly lower scale
-                          // (capped between 1.5 and 2.5) to make page loading and flipping instantaneous.
-                          // For large files (images/manga), use higher resolution cap (3.3x) for maximum crispness.
-                          if (!ctrl.isLargeFile.value) {
-                            return estimatedScale.clamp(0.5, (devicePixelRatio * 0.75).clamp(1.5, 2.5));
+                          try {
+                            final media = MediaQuery.of(context);
+                            final screenWidth = media.size.width;
+                            final screenHeight = media.size.height;
+                            final devicePixelRatio = media.devicePixelRatio;
+
+                            // Calculate the scale to fit the page to the viewport
+                            final double fitWidthScale = (screenWidth - 16) / page.width;
+                            final double fitHeightScale = (screenHeight - 32) / page.height;
+                            final double fitScale = fitWidthScale; //
+//
+//
+
+                            // Multiply by devicePixelRatio to render at physical pixels.
+                            // Add 15% extra scale (1.15) to guarantee sharpness and prevent pdfrx
+                            // from triggering secondary partial rendering during normal view.
+                            final double targetScale = fitScale * devicePixelRatio * 1.15;
+
+                            return targetScale.clamp(0.05, 2.0);
+                          } catch (_) {
+                            return estimatedScale.clamp(0.05, 1.2);
                           }
-                          return estimatedScale.clamp(0.5, devicePixelRatio * 1.1);
                         },
 
                         // ── Zoom limits ──
@@ -188,8 +256,9 @@ class ReaderView extends GetView<ReaderController> {
                       },
                     ),
                   ),
-                );
-              }),
+                ),
+              );
+            }),
             ),
 
               // ── Brightness overlay dimmer ──
@@ -270,7 +339,7 @@ PdfPageLayout _buildHorizontalLayout(
 
   // Find max page height to size the document height
   final maxHeight = pages.isNotEmpty 
-      ? pages.fold(0.0, (maxVal, page) => max(maxVal, page.height)) 
+      ? pages.fold(0.0, (maxVal, page) => max(maxVal, isCrop ? page.height * 1.18 : page.height)) 
       : 1.0;
 
   for (final page in pages) {
@@ -278,17 +347,17 @@ PdfPageLayout _buildHorizontalLayout(
     final displayHeight = isCrop ? page.height * 1.18 : page.height;
 
     final pageRect = Rect.fromLTWH(
-      x + (isCrop ? - (displayWidth - page.width) / 2 : 0),
-      (maxHeight - displayHeight) / 2 + (isCrop ? - (displayHeight - page.height) / 2 : 0),
+      x,
+      (maxHeight - displayHeight) / 2,
       displayWidth,
       displayHeight,
     );
     pageLayouts.add(pageRect);
-    x += page.width + pageGap;
+    x += displayWidth + pageGap;
   }
 
   return PdfPageLayout(
     pageLayouts: pageLayouts,
-    documentSize: Size(x, maxHeight + (isManga ? 0.0 : 16.0)),
+    documentSize: Size(x + (isManga ? 0.0 : 8.0), maxHeight + (isManga ? 0.0 : 16.0)),
   );
 }

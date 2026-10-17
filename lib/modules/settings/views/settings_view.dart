@@ -30,9 +30,12 @@ class SettingsView extends GetView<SettingsController> {
           onPressed: () => Get.back(),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        children: [
+      body: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            children: [
           // ── App Preferences Section ──
           _buildSectionHeader(context, 'preferences'.tr),
           const SizedBox(height: 8),
@@ -212,7 +215,7 @@ class SettingsView extends GetView<SettingsController> {
                     style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.w600),
                   ),
                   subtitle: const Text(
-                    'v1.0.0 (Premium)',
+                    'v2.0.0 (Premium)',
                     style: TextStyle(fontSize: 13),
                   ),
                   trailing: Icon(Icons.chevron_right_rounded, color: textSecondaryColor),
@@ -234,7 +237,9 @@ class SettingsView extends GetView<SettingsController> {
               ),
             ),
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -257,6 +262,7 @@ class SettingsView extends GetView<SettingsController> {
 
   void _showLanguageDialog(BuildContext context) {
     final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
     final cardBg = Theme.of(context).cardColor;
     final primaryColor = Theme.of(context).primaryColor;
 
@@ -264,6 +270,7 @@ class SettingsView extends GetView<SettingsController> {
       Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(24),
@@ -276,10 +283,18 @@ class SettingsView extends GetView<SettingsController> {
               )
             ],
           ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Align(
+                alignment: AlignmentDirectional.topEnd,
+                child: GestureDetector(
+                  onTap: () => Get.back(),
+                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
+                ),
+              ),
+              const SizedBox(height: 4),
               Icon(Icons.translate_rounded, color: primaryColor, size: 36),
               const SizedBox(height: 12),
               Text(
@@ -386,6 +401,7 @@ class SettingsView extends GetView<SettingsController> {
 
   void _showThemeDialog(BuildContext context) {
     final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
     final cardBg = Theme.of(context).cardColor;
     final primaryColor = Theme.of(context).primaryColor;
 
@@ -393,6 +409,7 @@ class SettingsView extends GetView<SettingsController> {
       Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(24),
@@ -405,10 +422,18 @@ class SettingsView extends GetView<SettingsController> {
               )
             ],
           ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Align(
+                alignment: AlignmentDirectional.topEnd,
+                child: GestureDetector(
+                  onTap: () => Get.back(),
+                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
+                ),
+              ),
+              const SizedBox(height: 4),
               Icon(Icons.style_rounded, color: primaryColor, size: 36),
               const SizedBox(height: 12),
               Text(
@@ -529,6 +554,7 @@ class SettingsView extends GetView<SettingsController> {
       Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(24),
@@ -541,10 +567,18 @@ class SettingsView extends GetView<SettingsController> {
               )
             ],
           ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Align(
+                alignment: AlignmentDirectional.topEnd,
+                child: GestureDetector(
+                  onTap: () => Get.back(),
+                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
+                ),
+              ),
+              const SizedBox(height: 4),
               Icon(Icons.font_download_rounded, color: primaryColor, size: 36),
               const SizedBox(height: 12),
               Text(
@@ -646,6 +680,7 @@ class SettingsView extends GetView<SettingsController> {
 
   void _showFontSizeDialog(BuildContext context) {
     final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
     final cardBg = Theme.of(context).cardColor;
     final primaryColor = Theme.of(context).primaryColor;
 
@@ -660,6 +695,7 @@ class SettingsView extends GetView<SettingsController> {
       Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(24),
@@ -672,10 +708,18 @@ class SettingsView extends GetView<SettingsController> {
               )
             ],
           ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Align(
+                alignment: AlignmentDirectional.topEnd,
+                child: GestureDetector(
+                  onTap: () => Get.back(),
+                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
+                ),
+              ),
+              const SizedBox(height: 4),
               Icon(Icons.format_size_rounded, color: primaryColor, size: 36),
               const SizedBox(height: 12),
               Text(

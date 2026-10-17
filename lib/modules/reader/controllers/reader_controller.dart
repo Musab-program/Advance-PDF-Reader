@@ -21,12 +21,16 @@ enum ReadingTheme {
   gray,
 }
 
-class ReaderController extends GetxController {
+class ReaderController extends GetxController with GetSingleTickerProviderStateMixin {
   final StorageService _storageService = Get.find<StorageService>();
 
   // pdfrx controller — made final to prevent detachment bugs when recreated
-  final PdfViewerController pdfViewerController = PdfViewerController();
+  PdfViewerController pdfViewerController = PdfViewerController();
   PdfTextSearcher? textSearcher;
+
+  // Custom double tap zoom animation controller
+  late AnimationController matrixAnimationController;
+  Animation<Matrix4>? matrixAnimation;
 
   final RxList<PdfEntity> pdfQueue = <PdfEntity>[].obs;
   final RxInt currentIndex = 0.obs;
@@ -34,8 +38,13 @@ class ReaderController extends GetxController {
   final RxInt totalPages = 0.obs;
   final RxBool isLoading = true.obs;
   final RxBool isDocumentLoading = true.obs;
-  final RxBool showOverlay = true.obs;
+  final RxBool showOverlay = false.obs;
   final RxBool isSinglePageMode = false.obs;
+
+  // ── Splash & Snapping Timers ──
+  Timer? _splashTimeoutTimer;
+  Timer? _snappingTimer;
+  bool _isRestoring = false;
 
   // ── New Features State ──
   final RxBool isCropMargins = false.obs;
@@ -61,9 +70,20 @@ class ReaderController extends GetxController {
   int? _targetPageJumpingTo;
   DateTime? _jumpTime;
 
+  // ── Scroll Position Preservation state ──
+  int? _savedPageNumber;
+  double? _savedRelativeX;
+  double? _savedRelativeY;
+  double? _savedZoom;
+  Timer? _savedPositionClearTimer;
+
   @override
   void onInit() {
     super.onInit();
+    matrixAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
     _updateStatusBar();
     _initSearcher();
     isMangaMode.value = _storageService.getMangaMode();
@@ -92,15 +112,30 @@ class ReaderController extends GetxController {
     update();
   }
 
+  int getInitialPage(String path) {
+    if (_pageToRestore != null) {
+      return _pageToRestore!;
+    }
+    final saved = _storageService.getProgress(path);
+    final total = _storageService.getPageCount(path);
+    if (saved > 0 && saved < 1.0 && total > 1) {
+      return (saved * total).round().clamp(1, total);
+    }
+    return 1;
+  }
+
   Future<void> _loadFromSavedFolder() async {
     isLoading.value = true;
     try {
       final folderPath = _storageService.getLastFolder();
       if (folderPath == null || folderPath.isEmpty) return;
+      final folderName = p.basename(folderPath);
       final files = await FileUtils.scanPdfFiles(folderPath);
-      pdfQueue.assignAll(files.map((f) => PdfFileModel.fromFile(f,
+      final List<PdfEntity> mapped = files.map((f) => PdfFileModel.fromFile(f,
           progress: _storageService.getProgress(f.path),
-          pageCount: _storageService.getPageCount(f.path))));
+          pageCount: _storageService.getPageCount(f.path))).toList();
+      mapped.sort((a, b) => FileUtils.naturalCompare(a.name, b.name, folderName: folderName));
+      pdfQueue.assignAll(mapped);
       if (currentIndex.value >= pdfQueue.length) currentIndex.value = 0;
       isSinglePageMode.value = false;
     } catch (_) {} finally {
@@ -113,11 +148,14 @@ class ReaderController extends GetxController {
     isLoading.value = true;
     try {
       final folderPath = p.dirname(filePath);
+      final folderName = p.basename(folderPath);
       _storageService.setLastFolder(folderPath);
       final files = await FileUtils.scanPdfFiles(folderPath);
-      pdfQueue.assignAll(files.map((f) => PdfFileModel.fromFile(f,
+      final List<PdfEntity> mapped = files.map((f) => PdfFileModel.fromFile(f,
           progress: _storageService.getProgress(f.path),
-          pageCount: _storageService.getPageCount(f.path))));
+          pageCount: _storageService.getPageCount(f.path))).toList();
+      mapped.sort((a, b) => FileUtils.naturalCompare(a.name, b.name, folderName: folderName));
+      pdfQueue.assignAll(mapped);
       final idx = pdfQueue.indexWhere((pdf) => pdf.path == filePath);
       currentIndex.value = idx >= 0 ? idx : 0;
       isSinglePageMode.value = false;
@@ -135,15 +173,27 @@ class ReaderController extends GetxController {
     }
   }
 
+  void loadFromFileFromIntent(String filePath) {
+    _loadFromFile(filePath);
+  }
+
   // ── Toggle overlay on tap ──
   void toggleOverlay() {
+    _saveCurrentPosition();
     showOverlay.value = !showOverlay.value;
     _updateStatusBar();
+    _restorePositionPeriodic(durationMs: 500);
   }
 
   void _updateStatusBar() {
     if (showOverlay.value) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: readingTheme.value == ReadingTheme.dark ? Brightness.light : Brightness.dark,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: readingTheme.value == ReadingTheme.dark ? Brightness.light : Brightness.dark,
+      ));
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     }
@@ -155,45 +205,119 @@ class ReaderController extends GetxController {
     _resetViewer();
   }
 
-  void _lockScrollPosition(Matrix4 matrix, {int durationMs = 450}) {
-    final startTime = DateTime.now();
-    // Periodically force the scroll matrix to stay completely locked in place
-    // during layout changes, theme switches, or keyboard visibility animations.
-    Timer.periodic(const Duration(milliseconds: 16), (t) {
-      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-      if (elapsed >= durationMs) {
-        t.cancel();
-      } else {
-        try {
-          pdfViewerController.value = matrix;
-        } catch (_) {}
+  // ── Save current scroll and zoom state relative to the page ──
+  void _saveCurrentPosition() {
+    try {
+      final centerPos = pdfViewerController.centerPosition;
+      final layouts = pdfViewerController.layout.pageLayouts;
+      
+      // Find the page that contains the center position, or the closest page
+      int closestPage = 1;
+      double minDistance = double.infinity;
+      
+      for (int i = 0; i < layouts.length; i++) {
+        final rect = layouts[i];
+        if (rect.contains(centerPos)) {
+          closestPage = i + 1;
+          break;
+        }
+        final dist = (rect.center - centerPos).distanceSquared;
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPage = i + 1;
+        }
       }
+      
+      final pageRect = layouts[closestPage - 1];
+      _savedPageNumber = closestPage;
+      _savedRelativeX = (centerPos.dx - pageRect.left) / pageRect.width;
+      _savedRelativeY = (centerPos.dy - pageRect.top) / pageRect.height;
+      _savedZoom = pdfViewerController.currentZoom;
+    } catch (_) {
+      // Fallback to currentPage.value
+      try {
+        final pageNumber = currentPage.value;
+        if (pageNumber > 0 && pageNumber <= totalPages.value) {
+          final pageRect = pdfViewerController.layout.pageLayouts[pageNumber - 1];
+          final centerPos = pdfViewerController.centerPosition;
+          _savedPageNumber = pageNumber;
+          _savedRelativeX = (centerPos.dx - pageRect.left) / pageRect.width;
+          _savedRelativeY = (centerPos.dy - pageRect.top) / pageRect.height;
+          _savedZoom = pdfViewerController.currentZoom;
+        }
+      } catch (_) {
+        _savedPageNumber = null;
+      }
+    }
+  }
+
+  bool get isRestoringPosition => _isRestoring && _savedPageNumber != null;
+
+  void clearSavedPosition() {
+    _savedPageNumber = null;
+    _savedRelativeX = null;
+    _savedRelativeY = null;
+    _savedZoom = null;
+    _savedPositionClearTimer?.cancel();
+    _savedPositionClearTimer = null;
+  }
+
+  Matrix4? getCorrectedMatrixForLayout(PdfPageLayout layout, Size viewSize) {
+    if (_savedPageNumber == null || _savedRelativeX == null || _savedRelativeY == null || _savedZoom == null) {
+      return null;
+    }
+    try {
+      final savedPage = _savedPageNumber!;
+      final relX = _savedRelativeX!;
+      final relY = _savedRelativeY!;
+      final zoom = _savedZoom!;
+
+      if (savedPage <= layout.pageLayouts.length) {
+        final pageRect = layout.pageLayouts[savedPage - 1];
+        final targetCenterX = pageRect.left + relX * pageRect.width;
+        final targetCenterY = pageRect.top + relY * pageRect.height;
+        
+        return pdfViewerController.calcMatrixFor(
+          Offset(targetCenterX, targetCenterY),
+          zoom: zoom,
+          viewSize: viewSize,
+        ).scaled(1.0, 1.0, zoom);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ── Start restoration grace period (clears saved state after durationMs) ──
+  void _restorePositionPeriodic({int durationMs = 500}) {
+    _isRestoring = true;
+    _savedPositionClearTimer?.cancel();
+    _savedPositionClearTimer = Timer(Duration(milliseconds: durationMs), () {
+      _isRestoring = false;
+      clearSavedPosition();
     });
   }
 
   void toggleCropMargins(bool val) {
-    // Preserve translation matrix to prevent scroll jumps
-    final savedMatrix = pdfViewerController.value;
+    _saveCurrentPosition();
     isCropMargins.value = val;
     update();
-    _lockScrollPosition(savedMatrix);
+    _restorePositionPeriodic(durationMs: 500);
   }
 
   void toggleMangaMode(bool val) {
-    // Preserve translation matrix to prevent scroll jumps
-    final savedMatrix = pdfViewerController.value;
+    _saveCurrentPosition();
     isMangaMode.value = val;
     _storageService.saveMangaMode(val);
     update();
-    _lockScrollPosition(savedMatrix);
+    _restorePositionPeriodic(durationMs: 500);
   }
 
   void setReadingTheme(ReadingTheme theme) {
-    // Preserve translation matrix to prevent scroll jumps
-    final savedMatrix = pdfViewerController.value;
+    _saveCurrentPosition();
     readingTheme.value = theme;
+    _updateStatusBar();
     update();
-    _lockScrollPosition(savedMatrix);
+    _restorePositionPeriodic(durationMs: 500);
   }
 
   // ── Called when pdfrx reports the page count ──
@@ -205,35 +329,17 @@ class ReaderController extends GetxController {
       _storageService.savePageCount(pdf.path, totalPages.value);
       _storageService.addRecentFile(pdf.path, pdf.name);
 
-      if (_pageToRestore != null) {
-        final target = _pageToRestore!.clamp(1, totalPages.value);
-        currentPage.value = target;
-        _pageToRestore = null;
-        
-        final restoreDelay = totalPages.value > 150 ? 300 : 150;
-        Future.delayed(
-          Duration(milliseconds: restoreDelay),
-          () => pdfViewerController.goToPage(pageNumber: target),
-        );
-      } else {
-        // Restore saved page from storage
-        final saved = _storageService.getProgress(pdf.path);
-        if (saved > 0 && saved < 1.0 && totalPages.value > 1) {
-          final target =
-              (saved * totalPages.value).round().clamp(1, totalPages.value);
-          currentPage.value = target;
-          
-          final restoreDelay = totalPages.value > 150 ? 300 : 150;
-          Future.delayed(
-            Duration(milliseconds: restoreDelay),
-            () => pdfViewerController.goToPage(pageNumber: target),
-          );
-        }
+      final initialPage = getInitialPage(pdf.path);
+      currentPage.value = initialPage;
+      _pageToRestore = null;
+
+      // Update progress and last read date immediately upon opening the file
+      if (totalPages.value > 0) {
+        _storageService.saveProgress(pdf.path, initialPage / totalPages.value);
       }
     }
 
-    // Dynamic delay based on file size to ensure PDFs render the first page completely in the background
-    int delayMs = 1350; // Minimum 1.35s for small files to guarantee rendering finishes under splash
+    // Calculate if file is large to optimize page rendering resolution scale in the view
     isLargeFile.value = false;
     if (pdfQueue.isNotEmpty && currentIndex.value < pdfQueue.length) {
       try {
@@ -245,22 +351,129 @@ class ReaderController extends GetxController {
           if (megaBytes > 50) {
             isLargeFile.value = true;
           }
-          if (megaBytes > 250) {
-            delayMs = 2600; // Huge files (> 250MB)
-          } else if (megaBytes > 100) {
-            delayMs = 2000; // Medium-large files (> 100MB)
-          } else if (megaBytes > 50) {
-            delayMs = 1600; // Medium files (> 50MB)
+        }
+      } catch (_) {}
+    }
+
+    // Calculate dynamic delay based on file size to ensure PDF page rendering finishes under splash
+    int delayMs = 1400; // Base delay of 1.4s for files <= 12MB
+    if (pdfQueue.isNotEmpty && currentIndex.value < pdfQueue.length) {
+      try {
+        final pdf = pdfQueue[currentIndex.value];
+        final file = File(pdf.path);
+        if (file.existsSync()) {
+          final bytes = file.lengthSync();
+          final megaBytes = bytes / (1024 * 1024);
+          if (megaBytes > 12.0) {
+            final double extraMB = megaBytes - 12.0;
+            // Add 25ms per additional MB, capped at 5000ms max (5 seconds)
+            delayMs = (1400 + extraMB * 25.0).clamp(1400.0, 5000.0).toInt();
           }
         }
       } catch (_) {}
     }
 
-    // Hide loader smoothly after calculated delay
-    Future.delayed(Duration(milliseconds: delayMs), () {
-      isDocumentLoading.value = false;
-      update();
+    // Set a dynamic safe delay to dismiss the splash screen
+    _splashTimeoutTimer?.cancel();
+    _splashTimeoutTimer = Timer(Duration(milliseconds: delayMs), () {
+      _dismissSplash();
     });
+  }
+
+  void _dismissSplash() {
+    if (isDocumentLoading.value) {
+      isDocumentLoading.value = false;
+      _splashTimeoutTimer?.cancel();
+      update();
+    }
+  }
+
+  // ── Scroll Snapping & Gesture Velocity Calculations ──
+  int getClosestPage() {
+    try {
+      if (pdfViewerController.layout == null) return currentPage.value;
+      final centerPos = pdfViewerController.centerPosition;
+      final layouts = pdfViewerController.layout.pageLayouts;
+      
+      int closestPage = 1;
+      double minDistance = double.infinity;
+      
+      for (int i = 0; i < layouts.length; i++) {
+        final rect = layouts[i];
+        final dist = (rect.center - centerPos).distanceSquared;
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPage = i + 1;
+        }
+      }
+      return closestPage;
+    } catch (_) {
+      return currentPage.value;
+    }
+  }
+
+  void handleInteractionEnd(ScaleEndDetails details) {
+    try {
+      if (!pdfViewerController.isReady) return;
+      if (pdfViewerController.layout == null) return;
+      
+      // Disable snapping completely in vertical scroll mode to let continuous inertial scrolling run smoothly
+      if (!isSinglePageMode.value) {
+        return;
+      }
+      
+      final currentZoom = pdfViewerController.currentZoom;
+      final minScale = pdfViewerController.minScale;
+      
+      // Snapping is only active when zoomed out (close to standard reading view)
+      if (currentZoom > minScale + 0.08) {
+        return; // Allow free-form panning when zoomed in
+      }
+      
+      final bool isHorizontal = isSinglePageMode.value;
+      final double velocity = isHorizontal 
+          ? details.velocity.pixelsPerSecond.dx 
+          : details.velocity.pixelsPerSecond.dy;
+      
+      int targetPage = currentPage.value;
+      final int total = totalPages.value;
+      
+      // Check swipe direction & calculate target page based on velocity
+      if (velocity < -800) {
+        // Scrolling forward (moving to next pages)
+        if (velocity <= -2500) {
+          targetPage = (targetPage + 2).clamp(1, total);
+        } else {
+          targetPage = (targetPage + 1).clamp(1, total);
+        }
+      } else if (velocity > 800) {
+        // Scrolling backward (moving to previous pages)
+        if (velocity >= 2500) {
+          targetPage = (targetPage - 2).clamp(1, total);
+        } else {
+          targetPage = (targetPage - 1).clamp(1, total);
+        }
+      } else {
+        // Low velocity: snap to closest page
+        targetPage = getClosestPage();
+      }
+      
+      // Animate smoothly to the resolved target page after 150ms delay
+      // to let the default InteractiveViewer fling finish completely, debounced via _snappingTimer
+      _snappingTimer?.cancel();
+      _snappingTimer = Timer(const Duration(milliseconds: 150), () {
+        if (pdfViewerController.isReady) {
+          pdfViewerController.goToPage(
+            pageNumber: targetPage,
+            duration: const Duration(milliseconds: 250),
+          );
+        }
+      });
+    } catch (_) {}
+  }
+
+  void handleInteractionStart(ScaleStartDetails details) {
+    _snappingTimer?.cancel();
   }
 
   // ── Called on every visible page change ──
@@ -284,24 +497,6 @@ class ReaderController extends GetxController {
     if (totalPages.value > 0 && pdfQueue.isNotEmpty) {
       final pdf = pdfQueue[currentIndex.value];
       _storageService.saveProgress(pdf.path, page / totalPages.value);
-    }
-
-    // Hint when reaching the last page
-    if (totalPages.value > 0 && page == totalPages.value) {
-      if (currentIndex.value < pdfQueue.length - 1) {
-        showOverlay.value = true;
-        _updateStatusBar();
-        Get.snackbar(
-          'end_of_document'.tr,
-          'next_button_hint'.tr,
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: const Color(0xFF1A2A4A),
-          colorText: Colors.white,
-          duration: const Duration(seconds: 4),
-          icon: const Icon(Icons.info_outline, color: Colors.white),
-          margin: const EdgeInsets.only(bottom: 100, left: 16, right: 16),
-        );
-      }
     }
   }
 
@@ -332,9 +527,7 @@ class ReaderController extends GetxController {
   }
 
   void handlePreviousAction() {
-    if (currentPage.value > 1) {
-      jumpToPage(1);
-    } else if (currentIndex.value > 0) {
+    if (currentIndex.value > 0) {
       currentIndex.value--;
       _resetViewer();
     }
@@ -351,12 +544,21 @@ class ReaderController extends GetxController {
     currentPage.value = 1;
     totalPages.value = 0;
     isDocumentLoading.value = true;
+    pdfViewerController = PdfViewerController(); // Re-initialize the controller
+    _isRestoring = false;
+    clearSavedPosition();
+    _splashTimeoutTimer?.cancel();
+    _snappingTimer?.cancel();
     _initSearcher();
     update();
   }
 
   @override
   void onClose() {
+    matrixAnimationController.dispose();
+    _savedPositionClearTimer?.cancel();
+    _splashTimeoutTimer?.cancel();
+    _snappingTimer?.cancel();
     // Restore status bar and orientation on exit
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([
@@ -369,6 +571,69 @@ class ReaderController extends GetxController {
     searchTextController.dispose();
     searchFocusNode.dispose();
     super.onClose();
+  }
+
+  void _animateMatrix(Matrix4 targetMatrix) {
+    matrixAnimationController.stop();
+    matrixAnimation = Matrix4Tween(
+      begin: pdfViewerController.value,
+      end: targetMatrix,
+    ).animate(CurvedAnimation(
+      parent: matrixAnimationController,
+      curve: Curves.easeOutCubic,
+    ));
+    
+    matrixAnimationController.addListener(() {
+      if (matrixAnimation != null) {
+        pdfViewerController.value = matrixAnimation!.value;
+      }
+    });
+    
+    matrixAnimationController.forward(from: 0.0);
+  }
+
+  void handleDoubleTapZoom(Offset localPosition, Size viewportSize) {
+    try {
+      if (pdfViewerController.layout == null) return;
+      
+      final currentMatrix = pdfViewerController.value;
+      final double scale = currentMatrix.storage[0];
+      final double tx = currentMatrix.storage[12];
+      final double ty = currentMatrix.storage[13];
+      
+      // Convert viewport tap coordinates to document coordinates
+      final double docX = (localPosition.dx - tx) / scale;
+      final double docY = (localPosition.dy - ty) / scale;
+      
+      // Calculate dynamic fit-width zoom scale relative to the document size
+      final double fitWidthZoom = viewportSize.width / pdfViewerController.layout.documentSize.width;
+      final double zoomedInZoom = fitWidthZoom * 2.0;
+      
+      double targetZoom;
+      Offset targetCenter;
+      
+      if (scale < fitWidthZoom - 0.01) {
+        // State 1: Zoomed out -> restore to exactly fit-width
+        targetZoom = fitWidthZoom;
+        targetCenter = Offset(pdfViewerController.layout.documentSize.width / 2, docY);
+      } else if (scale < fitWidthZoom + 0.05) {
+        // State 2: Normal fit-width size -> zoom in to exactly 2x of fit-width zoom centered at tapped point
+        targetZoom = zoomedInZoom;
+        targetCenter = Offset(docX, docY);
+      } else {
+        // State 3: Zoomed in -> zoom out back to exactly fit-width
+        targetZoom = fitWidthZoom;
+        targetCenter = Offset(pdfViewerController.layout.documentSize.width / 2, docY);
+      }
+      
+      final targetMatrix = pdfViewerController.calcMatrixFor(
+        targetCenter,
+        zoom: targetZoom,
+        viewSize: viewportSize,
+      );
+      
+      _animateMatrix(targetMatrix);
+    } catch (_) {}
   }
 
   PdfEntity? get currentPdf =>
@@ -414,7 +679,7 @@ class ReaderController extends GetxController {
   }
 
   void toggleSearchMode() {
-    final savedMatrix = pdfViewerController.value;
+    _saveCurrentPosition();
     isSearchMode.value = !isSearchMode.value;
     if (isSearchMode.value) {
       Future.delayed(const Duration(milliseconds: 50), () {
@@ -423,11 +688,12 @@ class ReaderController extends GetxController {
     } else {
       clearSearch();
     }
-    _lockScrollPosition(savedMatrix, durationMs: 450);
+    _restorePositionPeriodic(durationMs: 500);
   }
 
   // ── Screen Rotation API ──
   void toggleOrientation() {
+    _saveCurrentPosition();
     final context = Get.context;
     if (context == null) return;
     final isPortrait = context.mediaQuery.orientation == Orientation.portrait;
@@ -441,6 +707,7 @@ class ReaderController extends GetxController {
         DeviceOrientation.portraitUp,
       ]);
     }
+    _restorePositionPeriodic(durationMs: 800);
   }
 
   // ── Color Theme Utilities ──
@@ -553,47 +820,51 @@ class ReaderController extends GetxController {
       Dialog(
         backgroundColor: dialogTheme.scaffoldBackgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline, color: dialogTheme.primaryColor, size: 24),
-                  const SizedBox(width: 8),
-                  Text(
-                    'file_details'.tr,
-                    style: TextStyle(
-                      color: dialogTheme.colorScheme.onSurface,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, color: dialogTheme.primaryColor, size: 24),
+                      const SizedBox(width: 8),
+                      Text(
+                        'file_details'.tr,
+                        style: TextStyle(
+                          color: dialogTheme.colorScheme.onSurface,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _detailRow(dialogTheme, 'details_name'.tr, pdf.name),
+                  _detailRow(dialogTheme, 'details_size'.tr, FileUtils.formatSize(pdf.size)),
+                  _detailRow(dialogTheme, 'details_path'.tr, pdf.path),
+                  _detailRow(dialogTheme, 'details_total_pages'.tr, '${totalPages.value}'),
+                  _detailRow(dialogTheme, 'details_last_modified'.tr, lastMod.toString().split('.').first),
+                  const SizedBox(height: 20),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Get.back(),
+                      child: Text('close'.tr, style: TextStyle(color: dialogTheme.primaryColor)),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              _detailRow(dialogTheme, 'details_name'.tr, pdf.name),
-              _detailRow(dialogTheme, 'details_size'.tr, FileUtils.formatSize(pdf.size)),
-              _detailRow(dialogTheme, 'details_path'.tr, pdf.path),
-              _detailRow(dialogTheme, 'details_total_pages'.tr, '${totalPages.value}'),
-              _detailRow(dialogTheme, 'details_last_modified'.tr, lastMod.toString().split('.').first),
-              const SizedBox(height: 20),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Get.back(),
-                  child: Text('close'.tr, style: TextStyle(color: dialogTheme.primaryColor)),
-                ),
-              ),
-          ]),
+            ),
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _detailRow(ThemeData theme, String label, String value) {
     return Padding(
@@ -622,82 +893,85 @@ class ReaderController extends GetxController {
       Dialog(
         backgroundColor: dialogTheme.scaffoldBackgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'go_to_page'.tr,
-                style: TextStyle(
-                  color: dialogTheme.colorScheme.onSurface,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'enter_page_number'.trParams({'total': '${totalPages.value}'}),
-                style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: textController,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: dialogTheme.cardColor,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  hintStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.4)),
-                ),
-                autofocus: true,
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextButton(
-                    onPressed: () => Get.back(),
-                    child: Text('cancel'.tr, style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6))),
-                  ),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: dialogTheme.primaryColor,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                  Text(
+                    'go_to_page'.tr,
+                    style: TextStyle(
+                      color: dialogTheme.colorScheme.onSurface,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
                     ),
-                    onPressed: () {
-                      final val = int.tryParse(textController.text);
-                      if (val != null && val >= 1 && val <= totalPages.value) {
-                        jumpToPage(val);
-                        Get.back();
-                      } else {
-                        Get.snackbar(
-                          'invalid_page'.tr,
-                          'enter_valid_page_range'.trParams({'total': '${totalPages.value}'}),
-                          snackPosition: SnackPosition.BOTTOM,
-                          backgroundColor: Colors.red.shade800,
-                          colorText: Colors.white,
-                        );
-                      }
-                    },
-                    child: Text('apply'.tr, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'enter_page_number'.trParams({'total': '${totalPages.value}'}),
+                    style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: textController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: dialogTheme.cardColor,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      hintStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.4)),
+                    ),
+                    autofocus: true,
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      TextButton(
+                        onPressed: () => Get.back(),
+                        child: Text('cancel'.tr, style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6))),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: dialogTheme.primaryColor,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                        ),
+                        onPressed: () {
+                          final val = int.tryParse(textController.text);
+                          if (val != null && val >= 1 && val <= totalPages.value) {
+                            jumpToPage(val);
+                            Get.back();
+                          } else {
+                            Get.snackbar(
+                              'invalid_page'.tr,
+                              'enter_valid_page_range'.trParams({'total': '${totalPages.value}'}),
+                              snackPosition: SnackPosition.BOTTOM,
+                              backgroundColor: Colors.red.shade800,
+                              colorText: Colors.white,
+                            );
+                          }
+                        },
+                        child: Text('apply'.tr, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ── Document Conversion Actions ──
   Future<void> extractTextToTxt() async {
@@ -857,43 +1131,46 @@ class ReaderController extends GetxController {
       Dialog(
         backgroundColor: dialogTheme.scaffoldBackgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.merge_type, color: dialogTheme.primaryColor, size: 40),
-                const SizedBox(height: 12),
-                Text(
-                  'merge_documents'.tr,
-                  style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'merge_documents_desc'.tr,
-                  style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: dialogTheme.primaryColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.merge_type, color: dialogTheme.primaryColor, size: 40),
+                  const SizedBox(height: 12),
+                  Text(
+                    'merge_documents'.tr,
+                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  onPressed: () {
-                    Get.back();
-                    Get.snackbar(
-                      'merge_documents'.tr,
-                      'merge_completed'.tr,
-                      snackPosition: SnackPosition.BOTTOM,
-                      backgroundColor: Colors.green.shade800,
-                      colorText: Colors.white,
-                    );
-                  },
-                  child: Text('start_merge'.tr, style: const TextStyle(color: Colors.white)),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  Text(
+                    'merge_documents_desc'.tr,
+                    style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: dialogTheme.primaryColor,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () {
+                      Get.back();
+                      Get.snackbar(
+                        'merge_documents'.tr,
+                        'merge_completed'.tr,
+                        snackPosition: SnackPosition.BOTTOM,
+                        backgroundColor: Colors.green.shade800,
+                        colorText: Colors.white,
+                      );
+                    },
+                    child: Text('start_merge'.tr, style: const TextStyle(color: Colors.white)),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -909,65 +1186,68 @@ class ReaderController extends GetxController {
       Dialog(
         backgroundColor: dialogTheme.scaffoldBackgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.call_split, color: dialogTheme.primaryColor, size: 40),
-                const SizedBox(height: 12),
-                Text(
-                  'split_pdf_pages'.tr,
-                  style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: fromController,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: 'from_page'.tr,
-                          labelStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6)),
-                        ),
-                        style: TextStyle(color: dialogTheme.colorScheme.onSurface),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: TextField(
-                        controller: toController,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: 'to_page'.tr,
-                          labelStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6)),
-                        ),
-                        style: TextStyle(color: dialogTheme.colorScheme.onSurface),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: dialogTheme.primaryColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.call_split, color: dialogTheme.primaryColor, size: 40),
+                  const SizedBox(height: 12),
+                  Text(
+                    'split_pdf_pages'.tr,
+                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  onPressed: () {
-                    Get.back();
-                    Get.snackbar(
-                      'split_pdf_pages'.tr,
-                      'split_completed'.trParams({'from': fromController.text, 'to': toController.text}),
-                      snackPosition: SnackPosition.BOTTOM,
-                      backgroundColor: Colors.green.shade800,
-                      colorText: Colors.white,
-                    );
-                  },
-                  child: Text('split_pdf'.tr, style: const TextStyle(color: Colors.white)),
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: fromController,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'from_page'.tr,
+                            labelStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6)),
+                          ),
+                          style: TextStyle(color: dialogTheme.colorScheme.onSurface),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: TextField(
+                          controller: toController,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'to_page'.tr,
+                            labelStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6)),
+                          ),
+                          style: TextStyle(color: dialogTheme.colorScheme.onSurface),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: dialogTheme.primaryColor,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () {
+                      Get.back();
+                      Get.snackbar(
+                        'split_pdf_pages'.tr,
+                        'split_completed'.trParams({'from': fromController.text, 'to': toController.text}),
+                        snackPosition: SnackPosition.BOTTOM,
+                        backgroundColor: Colors.green.shade800,
+                        colorText: Colors.white,
+                      );
+                    },
+                    child: Text('split_pdf'.tr, style: const TextStyle(color: Colors.white)),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -982,52 +1262,55 @@ class ReaderController extends GetxController {
       Dialog(
         backgroundColor: dialogTheme.scaffoldBackgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.branding_watermark_outlined, color: dialogTheme.primaryColor, size: 40),
-                const SizedBox(height: 12),
-                Text(
-                  'add_rotated_watermark'.tr,
-                  style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: txtController,
-                  decoration: InputDecoration(
-                    hintText: 'e.g. CONFIDENTIAL',
-                    hintStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.4)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.branding_watermark_outlined, color: dialogTheme.primaryColor, size: 40),
+                  const SizedBox(height: 12),
+                  Text(
+                    'add_rotated_watermark'.tr,
+                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  style: TextStyle(color: dialogTheme.colorScheme.onSurface),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        watermarkText.value = '';
-                        Get.back();
-                      },
-                      child: Text('clear'.tr, style: const TextStyle(color: Colors.red)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: txtController,
+                    decoration: InputDecoration(
+                      hintText: 'e.g. CONFIDENTIAL',
+                      hintStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.4)),
                     ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: dialogTheme.primaryColor,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    style: TextStyle(color: dialogTheme.colorScheme.onSurface),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          watermarkText.value = '';
+                          Get.back();
+                        },
+                        child: Text('clear'.tr, style: const TextStyle(color: Colors.red)),
                       ),
-                      onPressed: () {
-                        watermarkText.value = txtController.text;
-                        Get.back();
-                      },
-                      child: Text('apply'.tr, style: const TextStyle(color: Colors.white)),
-                    ),
-                  ],
-                ),
-              ],
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: dialogTheme.primaryColor,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () {
+                          watermarkText.value = txtController.text;
+                          Get.back();
+                        },
+                        child: Text('apply'.tr, style: const TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

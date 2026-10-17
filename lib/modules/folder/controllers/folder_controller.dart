@@ -1,4 +1,5 @@
 // lib/modules/folder/controllers/folder_controller.dart
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf_reader/core/services/storage_service.dart';
@@ -7,6 +8,7 @@ import 'package:pdf_reader/data/models/pdf_file_model.dart';
 import 'package:pdf_reader/domain/entities/pdf_entity.dart';
 import 'package:pdf_reader/domain/entities/library_item.dart';
 import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
+import 'package:share_plus/share_plus.dart';
 
 class FolderController extends GetxController {
   final StorageService _storageService = Get.find<StorageService>();
@@ -21,9 +23,120 @@ class FolderController extends GetxController {
   final RxString sortOrder = 'name'.obs; // 'name', 'date', 'size'
   final RxBool isAscending = true.obs;
 
+  // Selection Mode States
+  final RxBool isSelectionMode = false.obs;
+  final RxSet<String> selectedPaths = <String>{}.obs;
+  final Map<String, RxBool> selectedStatus = {};
+
+  RxBool getRxSelected(String path) {
+    if (!selectedStatus.containsKey(path)) {
+      selectedStatus[path] = (selectedPaths.contains(path)).obs;
+    }
+    return selectedStatus[path]!;
+  }
+
+  void toggleSelection(String path) {
+    final status = getRxSelected(path);
+    status.value = !status.value;
+    
+    if (status.value) {
+      selectedPaths.add(path);
+      isSelectionMode.value = true;
+    } else {
+      selectedPaths.remove(path);
+    }
+  }
+
+  bool isSelected(String path) => selectedPaths.contains(path);
+
+  void clearSelection() {
+    for (final path in selectedPaths) {
+      selectedStatus[path]?.value = false;
+    }
+    selectedPaths.clear();
+    isSelectionMode.value = false;
+  }
+
+  void selectAll() {
+    bool allSelected = true;
+    for (final pdf in filteredPdfFiles) {
+      if (!selectedPaths.contains(pdf.path)) {
+        allSelected = false;
+        break;
+      }
+    }
+
+    if (allSelected) {
+      for (final pdf in filteredPdfFiles) {
+        selectedPaths.remove(pdf.path);
+        getRxSelected(pdf.path).value = false;
+      }
+    } else {
+      for (final pdf in filteredPdfFiles) {
+        selectedPaths.add(pdf.path);
+        getRxSelected(pdf.path).value = true;
+      }
+      isSelectionMode.value = true;
+    }
+  }
+
+  Future<void> shareSelected() async {
+    if (selectedPaths.isEmpty) return;
+    try {
+      final List<XFile> xFiles = selectedPaths.map((path) => XFile(path)).toList();
+      await Share.shareXFiles(xFiles);
+    } catch (e) {
+      Get.snackbar('error'.tr, 'Share failed: $e', snackPosition: SnackPosition.BOTTOM);
+    } finally {
+      clearSelection();
+    }
+  }
+
+  Future<void> deleteSelected() async {
+    if (selectedPaths.isEmpty) return;
+    for (final path in selectedPaths) {
+      final pdf = pdfFiles.firstWhereOrNull((e) => e.path == path);
+      if (pdf != null) {
+        final item = LibraryItem(
+          path: pdf.path,
+          name: pdf.name,
+          type: LibraryItemType.file,
+          size: pdf.size,
+          extension: pdf.extension,
+          dateModified: pdf.lastRead ?? DateTime.now(),
+        );
+        _storageService.recycleItem(item);
+        _storageService.removeRecentFile(path);
+      }
+    }
+    clearSelection();
+    await refresh();
+    
+    // Sync home screen
+    try {
+      final homeController = Get.find<HomeController>();
+      homeController.refreshLibrary();
+    } catch (_) {}
+  }
+
+  final TextEditingController searchTextController = TextEditingController();
+  final RxString searchQuery = ''.obs;
+
+  List<PdfEntity> get filteredPdfFiles {
+    if (searchQuery.value.isEmpty) {
+      return pdfFiles;
+    }
+    return pdfFiles.where((pdf) {
+      return pdf.name.toLowerCase().contains(searchQuery.value.toLowerCase());
+    }).toList();
+  }
+
   @override
   void onInit() {
     super.onInit();
+    searchTextController.addListener(() {
+      searchQuery.value = searchTextController.text;
+    });
     final args = Get.arguments as Map<String, dynamic>?;
     if (args != null) {
       folderPath.value = args['folderPath'] ?? '';
@@ -43,12 +156,11 @@ class FolderController extends GetxController {
   }
 
   void _applySort() {
-    final List<PdfEntity> sorted = List.from(pdfFiles);
-    sorted.sort((a, b) {
+    pdfFiles.sort((a, b) {
       int cmp = 0;
       switch (sortOrder.value) {
         case 'name':
-          cmp = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          cmp = FileUtils.naturalCompare(a.name, b.name, folderName: folderName.value);
           break;
         case 'date':
           cmp = (a.lastRead ?? DateTime(0)).compareTo(b.lastRead ?? DateTime(0));
@@ -59,7 +171,6 @@ class FolderController extends GetxController {
       }
       return isAscending.value ? cmp : -cmp;
     });
-    pdfFiles.assignAll(sorted);
   }
 
   Future<void> _loadFiles() async {
@@ -93,7 +204,7 @@ class FolderController extends GetxController {
     DateTime? latestDate;
 
     for (final pdf in pdfFiles) {
-      if (pdf.progress > 0 && pdf.progress < 1.0 && pdf.lastRead != null) {
+      if (pdf.lastRead != null) {
         if (latestDate == null || pdf.lastRead!.isAfter(latestDate)) {
           latest = pdf;
           latestDate = pdf.lastRead;
@@ -135,11 +246,46 @@ class FolderController extends GetxController {
     update();
   }
 
-  /// Open a specific PDF at a given index in the reader
-  void openPdf(int index) {
-    _storageService.setLastFolder(folderPath.value);
-    _storageService.setLastFileIndex(index);
-    Get.toNamed('/reader', arguments: {'index': index});
+  void refreshProgress() {
+    bool changed = false;
+    for (int i = 0; i < pdfFiles.length; i++) {
+      final pdf = pdfFiles[i];
+      final newProgress = _storageService.getProgress(pdf.path);
+      final newLastRead = _storageService.getLastReadDate(pdf.path);
+      final newPageCount = _storageService.getPageCount(pdf.path);
+
+      if (pdf.progress != newProgress || pdf.lastRead != newLastRead || pdf.pageCount != newPageCount) {
+        pdfFiles[i] = PdfEntity(
+          path: pdf.path,
+          name: pdf.name,
+          size: pdf.size,
+          extension: pdf.extension,
+          progress: newProgress,
+          lastRead: newLastRead,
+          pageCount: newPageCount,
+        );
+        changed = true;
+      }
+    }
+    
+    _findLastReadFile();
+    pdfFiles.refresh();
+    
+    if (changed) {
+      _applySort();
+    }
+  }
+
+  /// Open a specific PDF in the reader
+  void openPdf(PdfEntity pdf) {
+    final originalIndex = pdfFiles.indexWhere((p) => p.path == pdf.path);
+    if (originalIndex >= 0) {
+      _storageService.setLastFolder(folderPath.value);
+      _storageService.setLastFileIndex(originalIndex);
+      Get.toNamed('/reader', arguments: {'index': originalIndex})?.then((_) {
+        refreshProgress();
+      });
+    }
   }
 
   /// Resume reading from where user stopped
@@ -149,8 +295,14 @@ class FolderController extends GetxController {
 
     final index = pdfFiles.indexWhere((pdf) => pdf.path == file.path);
     if (index >= 0) {
-      openPdf(index);
+      openPdf(pdfFiles[index]);
     }
+  }
+
+  @override
+  void onClose() {
+    searchTextController.dispose();
+    super.onClose();
   }
 
   @override
