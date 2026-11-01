@@ -18,6 +18,11 @@ class SearchController extends GetxController {
   final RxString selectedTypeFilter = 'all'.obs;
   final RxString selectedSizeFilter = 'all'.obs;
 
+  // Custom Filter ranges
+  final Rx<DateTimeRange?> customDateRange = Rx<DateTimeRange?>(null);
+  final Rx<double?> customMinSizeMb = Rx<double?>(null);
+  final Rx<double?> customMaxSizeMb = Rx<double?>(null);
+
   final RxList<LibraryItem> results = <LibraryItem>[].obs;
 
   @override
@@ -36,6 +41,9 @@ class SearchController extends GetxController {
     ever(selectedDateFilter, (_) => _filterAndSort());
     ever(selectedTypeFilter, (_) => _filterAndSort());
     ever(selectedSizeFilter, (_) => _filterAndSort());
+    ever(customDateRange, (_) => _filterAndSort());
+    ever(customMinSizeMb, (_) => _filterAndSort());
+    ever(customMaxSizeMb, (_) => _filterAndSort());
   }
 
   @override
@@ -49,7 +57,15 @@ class SearchController extends GetxController {
   }
 
   void setDateFilter(String filter) {
+    if (filter != 'custom') {
+      customDateRange.value = null;
+    }
     selectedDateFilter.value = filter;
+  }
+
+  void setCustomDate(DateTimeRange range) {
+    customDateRange.value = range;
+    selectedDateFilter.value = 'custom';
   }
 
   void setTypeFilter(String filter) {
@@ -57,7 +73,17 @@ class SearchController extends GetxController {
   }
 
   void setSizeFilter(String filter) {
+    if (filter != 'custom') {
+      customMinSizeMb.value = null;
+      customMaxSizeMb.value = null;
+    }
     selectedSizeFilter.value = filter;
+  }
+
+  void setCustomSize(double? minMb, double? maxMb) {
+    customMinSizeMb.value = minMb;
+    customMaxSizeMb.value = maxMb;
+    selectedSizeFilter.value = 'custom';
   }
 
   void _filterAndSort() {
@@ -75,19 +101,38 @@ class SearchController extends GetxController {
 
     // 3. Filter by Date
     if (selectedDateFilter.value != 'all') {
-      final now = DateTime.now();
-      Duration limit;
-      if (selectedDateFilter.value == '1_day') {
-        limit = const Duration(days: 1);
-      } else if (selectedDateFilter.value == '2_days') {
-        limit = const Duration(days: 2);
-      } else if (selectedDateFilter.value == '1_week') {
-        limit = const Duration(days: 7);
+      if (selectedDateFilter.value == 'custom' && customDateRange.value != null) {
+        final start = DateTime(
+          customDateRange.value!.start.year,
+          customDateRange.value!.start.month,
+          customDateRange.value!.start.day,
+        );
+        final end = DateTime(
+          customDateRange.value!.end.year,
+          customDateRange.value!.end.month,
+          customDateRange.value!.end.day,
+          23,
+          59,
+          59,
+        );
+        filtered = filtered.where((item) =>
+            item.dateModified.isAfter(start.subtract(const Duration(seconds: 1))) &&
+            item.dateModified.isBefore(end.add(const Duration(seconds: 1))));
       } else {
-        limit = const Duration(days: 14);
+        final now = DateTime.now();
+        Duration limit;
+        if (selectedDateFilter.value == '1_day') {
+          limit = const Duration(days: 1);
+        } else if (selectedDateFilter.value == '2_days') {
+          limit = const Duration(days: 2);
+        } else if (selectedDateFilter.value == '1_week') {
+          limit = const Duration(days: 7);
+        } else {
+          limit = const Duration(days: 14);
+        }
+        final threshold = now.subtract(limit);
+        filtered = filtered.where((item) => item.dateModified.isAfter(threshold));
       }
-      final threshold = now.subtract(limit);
-      filtered = filtered.where((item) => item.dateModified.isAfter(threshold));
     }
 
     // 4. Filter by Type
@@ -117,6 +162,13 @@ class SearchController extends GetxController {
     if (selectedSizeFilter.value != 'all') {
       filtered = filtered.where((item) {
         final size = item.size;
+        if (selectedSizeFilter.value == 'custom') {
+          final minBytes = (customMinSizeMb.value ?? 0.0) * 1024 * 1024;
+          final maxBytes = customMaxSizeMb.value != null
+              ? customMaxSizeMb.value! * 1024 * 1024
+              : double.infinity;
+          return size >= minBytes && size <= maxBytes;
+        }
         switch (selectedSizeFilter.value) {
           case 'under_1mb':
             return size < 1 * 1024 * 1024;

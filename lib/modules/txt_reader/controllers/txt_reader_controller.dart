@@ -20,7 +20,15 @@ class TxtReaderController extends GetxController {
     if (args != null) {
       filePath.value = args['filePath'] ?? '';
       fileName.value = args['fileName'] ?? 'Text Document';
-      _loadTextContent();
+      if (args.containsKey('rawText') && args['rawText'] != null) {
+        textContent.value = args['rawText'];
+        isLoading.value = false;
+        _storageService.addRecentFile(filePath.value, fileName.value);
+        _storageService.savePageCount(filePath.value, 1);
+        _storageService.saveProgress(filePath.value, 1.0);
+      } else {
+        _loadTextContent();
+      }
     }
   }
 

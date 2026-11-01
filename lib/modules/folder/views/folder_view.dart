@@ -359,22 +359,28 @@ class FolderView extends GetView<FolderController> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              IconButton(
-                icon: Icon(Icons.arrow_back_rounded, color: primaryColor),
-                onPressed: controller.clearSelection,
-              ),
-              const SizedBox(width: 8),
-              Obx(() => Text(
-                    '${controller.selectedPaths.length} ${"selected".tr}',
-                    style: TextStyle(
-                      color: textPrimaryColor,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )),
-            ],
+          Expanded(
+            child: Row(
+              children: [
+                IconButton(
+                  icon: Icon(Icons.arrow_back_rounded, color: primaryColor),
+                  onPressed: controller.clearSelection,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Obx(() => Text(
+                        '${controller.selectedPaths.length} ${"selected".tr}',
+                        style: TextStyle(
+                          color: textPrimaryColor,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      )),
+                ),
+              ],
+            ),
           ),
           Obx(() {
             bool allSelected = controller.filteredPdfFiles.isNotEmpty;

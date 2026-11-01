@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -40,6 +41,8 @@ class HomeController extends GetxController {
 
   final TextEditingController searchController = TextEditingController();
 
+  final RxList<String> favoriteTools = <String>[].obs;
+
   @override
   void onInit() {
     super.onInit();
@@ -49,6 +52,7 @@ class HomeController extends GetxController {
     pageController = PageController(initialPage: currentTab.value);
     _loadLibrary();
     loadRecentItems();
+    favoriteTools.assignAll(_storageService.getFavoriteTools());
     loadRecycledItems();
     // Delay scanning by 600ms to allow splash transition and rendering to complete instantly
     Future.delayed(const Duration(milliseconds: 600), scanDeviceDocuments);
@@ -124,6 +128,9 @@ class HomeController extends GetxController {
       isSelectionMode.value = true;
     } else {
       selectedPaths.remove(path);
+      if (selectedPaths.isEmpty) {
+        isSelectionMode.value = false;
+      }
     }
   }
 
@@ -154,12 +161,17 @@ class HomeController extends GetxController {
         selectedPaths.remove(item.path);
         getRxSelected(item.path).value = false;
       }
+      if (selectedPaths.isEmpty) {
+        isSelectionMode.value = false;
+      }
     } else {
       for (final item in activeItems) {
         selectedPaths.add(item.path);
         getRxSelected(item.path).value = true;
       }
-      isSelectionMode.value = true;
+      if (selectedPaths.isNotEmpty) {
+        isSelectionMode.value = true;
+      }
     }
   }
 
@@ -489,13 +501,19 @@ class HomeController extends GetxController {
   List<LibraryItem> getGlobalFavorites() {
     final favorites = _storageService.getFavoriteItems();
     final recycledPaths = _storageService.getRecycledItems().map((e) => e.path).toSet();
-    return favorites.where((item) => !recycledPaths.contains(item.path)).toList();
+    final query = searchQuery.value.trim().toLowerCase();
+    return favorites.where((item) {
+      if (recycledPaths.contains(item.path)) return false;
+      if (query.isNotEmpty && !item.name.toLowerCase().contains(query)) return false;
+      return true;
+    }).toList();
   }
 
   /// Load recent items details from StorageService
   void loadRecentItems() {
     final recents = _storageService.getRecentFiles();
     final recycledPaths = _storageService.getRecycledItems().map((e) => e.path).toSet();
+    final query = searchQuery.value.trim().toLowerCase();
     final list = recents
         .where((item) => !recycledPaths.contains(item['path']))
         .map((item) {
@@ -531,6 +549,7 @@ class HomeController extends GetxController {
             isFavorite: _storageService.isFavorite(path),
           );
         })
+        .where((item) => query.isEmpty || item.name.toLowerCase().contains(query))
         .toList();
 
     // Apply sorting to recent files
@@ -680,28 +699,188 @@ class HomeController extends GetxController {
   }
 
   /// Open a single file directly in the reader
-  void openFile(LibraryItem item) {
-    final ext = item.extension.toUpperCase();
+  void toggleFavoriteTool(String toolId) {
+    final wasAdded = _storageService.toggleFavoriteTool(toolId);
+    if (!wasAdded && !favoriteTools.contains(toolId) && favoriteTools.length >= 6) {
+      Get.snackbar(
+        'الحد الأقصى للاختصارات',
+        'تم الوصول للحد الأقصى (6 اختصارات). يمكنك إزالة اختصار لإضافة غيره.',
+        backgroundColor: const Color(0xFF1E293B),
+        colorText: Colors.white,
+        icon: const Icon(Icons.info_outline_rounded, color: Colors.amberAccent),
+        snackPosition: SnackPosition.BOTTOM,
+        margin: const EdgeInsets.all(16),
+        borderRadius: 12,
+        duration: const Duration(seconds: 3),
+      );
+    }
+    favoriteTools.assignAll(_storageService.getFavoriteTools());
+  }
+
+  bool isToolFavorite(String toolId) => favoriteTools.contains(toolId);
+
+  /// Open a single file directly in the reader, html/xml viewer, office viewer, or external app
+  Future<void> openFile(LibraryItem item) async {
+    final ext = (item.extension.isNotEmpty ? item.extension : p.extension(item.path))
+        .toUpperCase()
+        .replaceAll('.', '');
+
     if (ext == 'PDF') {
       final folderPath = p.dirname(item.path);
       _storageService.setLastFolder(folderPath);
       Get.toNamed('/reader', arguments: {
         'singleFile': item.path,
       })?.then((_) => refreshLibrary());
-    } else if (ext == 'TXT' || ext == 'HTML') {
+    } else if (ext == 'HTML' || ext == 'HTM') {
+      Get.toNamed('/html-reader', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'XML') {
+      Get.toNamed('/xml-reader', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'TXT') {
       Get.toNamed('/txt-reader', arguments: {
         'filePath': item.path,
         'fileName': item.name,
       })?.then((_) => refreshLibrary());
+    } else if (ext == 'DOCX' || ext == 'DOTX' || ext == 'DOCM') {
+      Get.toNamed('/office-viewer', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+        'fileType': 'DOCX',
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'XLSX' || ext == 'XLTX' || ext == 'XLSM') {
+      Get.toNamed('/office-viewer', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+        'fileType': 'XLSX',
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'CSV') {
+      Get.toNamed('/office-viewer', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+        'fileType': 'CSV',
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'PPTX' || ext == 'POTX' || ext == 'PPSX' || ext == 'PPTM') {
+      Get.toNamed('/office-viewer', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+        'fileType': 'PPTX',
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'DOC' || ext == 'DOT' || ext == 'WPS' || ext == 'WPT' || ext == 'RTF') {
+      Get.toNamed('/office-viewer', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+        'fileType': 'DOC',
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'XLS' || ext == 'XLT' || ext == 'ET' || ext == 'ETT') {
+      Get.toNamed('/office-viewer', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+        'fileType': 'XLS',
+      })?.then((_) => refreshLibrary());
+    } else if (ext == 'PPT' || ext == 'POT' || ext == 'PPS' || ext == 'DPS' || ext == 'DPT') {
+      Get.toNamed('/office-viewer', arguments: {
+        'filePath': item.path,
+        'fileName': item.name,
+        'fileType': 'PPT',
+      })?.then((_) => refreshLibrary());
     } else {
-      // Word, Excel, PPT
-      _storageService.addRecentFile(item.path, item.name);
-      loadRecentItems();
-      OpenFilex.open(item.path);
+      // Other external formats
+      _openExternalOfficeDoc(item, ext);
     }
   }
 
-  /// Open a folder → navigate to folder detail
+  Future<void> _openExternalOfficeDoc(LibraryItem item, String ext) async {
+    _storageService.addRecentFile(item.path, item.name);
+    loadRecentItems();
+
+    String? mimeType;
+    switch (ext) {
+      case 'DOC':
+      case 'DOT':
+      case 'WPS':
+      case 'WPT':
+        mimeType = 'application/msword';
+        break;
+      case 'XLS':
+      case 'XLT':
+      case 'ET':
+      case 'ETT':
+        mimeType = 'application/vnd.ms-excel';
+        break;
+      case 'PPT':
+      case 'POT':
+      case 'DPS':
+      case 'DPT':
+        mimeType = 'application/vnd.ms-powerpoint';
+        break;
+      case 'CSV':
+        mimeType = 'text/csv';
+        break;
+      case 'RTF':
+        mimeType = 'application/rtf';
+        break;
+      default:
+        mimeType = '*/*';
+        break;
+    }
+
+    if (Platform.isAndroid) {
+      try {
+        const channel = MethodChannel('com.example.pdf_reader/content_resolver');
+        final result = await channel.invokeMethod<String>('openExternalFile', {
+          'filePath': item.path,
+          'mimeType': mimeType,
+          'title': 'open_with'.tr,
+        });
+
+        if (result == 'NO_APP') {
+          Get.snackbar(
+            'تعذر فتح الملف',
+            'no_app_for_file'.tr,
+            backgroundColor: const Color(0xFF1E293B),
+            colorText: Colors.white,
+            duration: const Duration(seconds: 4),
+          );
+        } else if (result == 'FILE_NOT_FOUND') {
+          Get.snackbar(
+            'error'.tr,
+            'الملف غير موجود / File not found',
+            backgroundColor: Colors.red.shade800,
+            colorText: Colors.white,
+          );
+        }
+        return;
+      } catch (_) {}
+    }
+
+    try {
+      final result = await OpenFilex.open(item.path, type: mimeType == '*/*' ? null : mimeType);
+      if (result.type == ResultType.noAppToOpen) {
+        Get.snackbar(
+          'تعذر فتح الملف',
+          'no_app_for_file'.tr,
+          backgroundColor: const Color(0xFF1E293B),
+          colorText: Colors.white,
+          duration: const Duration(seconds: 4),
+        );
+      } else if (result.type == ResultType.fileNotFound) {
+        Get.snackbar(
+          'error'.tr,
+          'الملف غير موجود / File not found',
+          backgroundColor: Colors.red.shade800,
+          colorText: Colors.white,
+        );
+      }
+    } catch (e) {
+      Get.snackbar('error'.tr, 'حدث خطأ: $e', backgroundColor: Colors.red.shade800, colorText: Colors.white);
+    }
+  }
+
   void openFolder(LibraryItem item) {
     Get.toNamed('/folder', arguments: {
       'folderPath': item.path,

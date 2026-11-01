@@ -7,6 +7,13 @@ import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
 import 'package:pdf_reader/modules/home/widgets/main_drawer.dart';
 import 'package:pdf_reader/modules/home/widgets/selection_details_sheet.dart';
 import 'package:pdf_reader/routes/app_routes.dart';
+import 'package:pdf_reader/modules/background_remover/views/remove_background_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/merge_pdf_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/split_pdf_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/organize_pdf_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/image_to_pdf_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/pdf_to_image_view.dart';
+
 
 class HomeView extends GetView<HomeController> {
   const HomeView({super.key});
@@ -80,13 +87,18 @@ class HomeView extends GetView<HomeController> {
           } else {
             final isDark = Theme.of(context).brightness == Brightness.dark;
             final cardBg = Theme.of(context).cardColor;
+            final screenWidth = MediaQuery.of(context).size.width;
+            final screenHeight = MediaQuery.of(context).size.height;
+            final double systemBottom = MediaQuery.of(context).padding.bottom;
+            final double hPadding = screenWidth < 360 ? 10.0 : 20.0;
+            final double bPadding = screenHeight < 650 ? 10.0 : (systemBottom > 16 ? systemBottom : 16.0);
             
             return SafeArea(
               top: false,
               child: Center(
                 heightFactor: 1.0,
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+                  padding: EdgeInsets.only(left: hPadding, right: hPadding, bottom: bPadding),
                   child: Container(
                     constraints: const BoxConstraints(maxWidth: 550),
                     decoration: BoxDecoration(
@@ -118,8 +130,13 @@ class HomeView extends GetView<HomeController> {
                         elevation: 0,
                         selectedItemColor: Theme.of(context).primaryColor,
                         unselectedItemColor: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-                        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                        unselectedLabelStyle: const TextStyle(fontSize: 11),
+                        selectedLabelStyle: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: screenWidth < 360 ? 10 : 11,
+                        ),
+                        unselectedLabelStyle: TextStyle(
+                          fontSize: screenWidth < 360 ? 9.5 : 11,
+                        ),
                         onTap: (index) {
                           controller.currentTab.value = index;
                           controller.pageController.jumpToPage(index);
@@ -130,23 +147,28 @@ class HomeView extends GetView<HomeController> {
                         type: BottomNavigationBarType.fixed,
                         items: [
                           BottomNavigationBarItem(
-                            icon: const Icon(Icons.history_rounded),
+                            icon: const Icon(Icons.history_outlined),
+                            activeIcon: const Icon(Icons.history_rounded),
                             label: 'recents'.tr,
                           ),
                           BottomNavigationBarItem(
-                            icon: const Icon(Icons.picture_as_pdf_rounded),
+                            icon: const Icon(Icons.picture_as_pdf_outlined),
+                            activeIcon: const Icon(Icons.picture_as_pdf_rounded),
                             label: 'files'.tr,
                           ),
                           BottomNavigationBarItem(
-                            icon: const Icon(Icons.folder_rounded),
+                            icon: const Icon(Icons.folder_outlined),
+                            activeIcon: const Icon(Icons.folder_rounded),
                             label: 'folders'.tr,
                           ),
                           BottomNavigationBarItem(
-                            icon: const Icon(Icons.star_rounded),
+                            icon: const Icon(Icons.star_outline_rounded),
+                            activeIcon: const Icon(Icons.star_rounded),
                             label: 'favorites'.tr,
                           ),
                           BottomNavigationBarItem(
-                            icon: const Icon(Icons.handyman_rounded),
+                            icon: const Icon(Icons.handyman_outlined),
+                            activeIcon: const Icon(Icons.handyman_rounded),
                             label: 'tools'.tr,
                           ),
                         ],
@@ -238,100 +260,450 @@ class HomeView extends GetView<HomeController> {
     });
   }
 
+  List<Map<String, dynamic>> _getToolsList(BuildContext context) {
+    return [
+      {
+        'id': 'remove_bg',
+        'title': 'remove_background'.tr,
+        'desc': 'desc_remove_bg'.tr,
+        'icon': Icons.auto_fix_high_rounded,
+        'isAvailable': true,
+        'action': () => Get.to(() => const RemoveBackgroundView()),
+      },
+      {
+        'id': 'merge_pdf',
+        'title': 'tool_merge_pdf'.tr,
+        'desc': 'desc_merge_pdf'.tr,
+        'icon': Icons.merge_type_rounded,
+        'isAvailable': true,
+        'action': () => Get.to(() => const MergePdfView()),
+      },
+      {
+        'id': 'split_pdf',
+        'title': 'tool_split_pdf'.tr,
+        'desc': 'desc_split_pdf'.tr,
+        'icon': Icons.call_split_rounded,
+        'isAvailable': true,
+        'action': () => Get.to(() => const SplitPdfView()),
+      },
+      {
+        'id': 'organize_pdf',
+        'title': 'tool_organize_pdf'.tr,
+        'desc': 'desc_organize_pdf'.tr,
+        'icon': Icons.auto_stories_rounded,
+        'isAvailable': true,
+        'action': () => Get.to(() => const OrganizePdfView()),
+      },
+      {
+        'id': 'img_to_pdf',
+        'title': 'tool_img_to_pdf'.tr,
+        'desc': 'desc_img_to_pdf'.tr,
+        'icon': Icons.add_photo_alternate_rounded,
+        'isAvailable': true,
+        'action': () => Get.to(() => const ImageToPdfView()),
+      },
+      {
+        'id': 'pdf_to_img',
+        'title': 'tool_pdf_to_img'.tr,
+        'desc': 'desc_pdf_to_img'.tr,
+        'icon': Icons.photo_library_rounded,
+        'isAvailable': true,
+        'action': () => Get.to(() => const PdfToImageView()),
+      },
+      {
+        'id': 'compress_pdf',
+        'title': 'tool_compress_pdf'.tr,
+        'desc': 'compress_pdf_desc'.tr,
+        'icon': Icons.compress_rounded,
+        'isAvailable': false,
+        'action': () => _showComingSoonDialog(context, 'tool_compress_pdf'.tr),
+      },
+      {
+        'id': 'protect_pdf',
+        'title': 'tool_protect_pdf'.tr,
+        'desc': 'tool_coming_soon'.tr,
+        'icon': Icons.lock_outline_rounded,
+        'isAvailable': false,
+        'action': () => _showComingSoonDialog(context, 'tool_protect_pdf'.tr),
+      },
+      {
+        'id': 'watermark',
+        'title': 'tool_watermark'.tr,
+        'desc': 'add_rotated_watermark_desc'.tr,
+        'icon': Icons.branding_watermark_rounded,
+        'isAvailable': false,
+        'action': () => _showComingSoonDialog(context, 'tool_watermark'.tr),
+      },
+      {
+        'id': 'extract_text',
+        'title': 'tool_extract_text'.tr,
+        'desc': 'desc_extract_text'.tr,
+        'icon': Icons.text_fields_rounded,
+        'isAvailable': false,
+        'action': () => _showComingSoonDialog(context, 'tool_extract_text'.tr),
+      },
+    ];
+  }
+
   Widget _buildToolsTab(BuildContext context) {
     final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
     final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
     final cardBg = Theme.of(context).cardColor;
     final primaryColor = Theme.of(context).primaryColor;
     final borderCol = Theme.of(context).dividerColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final List<Map<String, dynamic>> toolsList = [
-      {
-        'title': 'Merge PDFs',
-        'desc': 'Combine multiple PDF files into one',
-        'icon': Icons.merge_type_rounded,
-      },
-      {
-        'title': 'Split PDF',
-        'desc': 'Extract specific pages into a new file',
-        'icon': Icons.call_split_rounded,
-      },
-      {
-        'title': 'Image to PDF',
-        'desc': 'Convert images to high quality PDF',
-        'icon': Icons.image_rounded,
-      },
-      {
-        'title': 'PDF to Image',
-        'desc': 'Extract pages from PDF to images',
-        'icon': Icons.picture_in_picture_rounded,
-      },
-      {
-        'title': 'Extract Text',
-        'desc': 'Extract text characters from documents',
-        'icon': Icons.text_fields_rounded,
-      },
-    ];
+    final toolsList = _getToolsList(context);
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Text(
-            'tools'.tr,
-            style: TextStyle(color: textPrimaryColor, fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-        ),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.1,
-          ),
-          itemCount: toolsList.length,
-          itemBuilder: (context, index) {
-            final tool = toolsList[index];
-            return Container(
+    final screenWidth = MediaQuery.of(context).size.width;
+    final int crossAxisCount = screenWidth > 650 ? 3 : 2;
+    final double childAspectRatio = screenWidth > 650
+        ? 1.3
+        : (screenWidth > 380
+            ? 1.15
+            : (screenWidth < 340 ? 0.92 : 1.0));
+
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: childAspectRatio,
+      ),
+      itemCount: toolsList.length,
+      itemBuilder: (context, index) {
+        final tool = toolsList[index];
+        final VoidCallback? onTap = tool['action'] as VoidCallback?;
+        final isAvailable = tool['isAvailable'] as bool;
+
+        return Material(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(18),
+          elevation: 0,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               decoration: BoxDecoration(
-                color: cardBg,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: borderCol.withOpacity(0.5)),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: isDark
+                      ? const Color(0xFF22304D)
+                      : borderCol.withValues(alpha: 0.3),
+                  width: 1.0,
+                ),
               ),
-              padding: const EdgeInsets.all(12),
+              child: Stack(
+                children: [
+                  // Coming Soon badge at top-end
+                  if (!isAvailable)
+                    PositionedDirectional(
+                      top: 0,
+                      end: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Text(
+                          'tool_coming_soon_badge'.tr,
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // Centered Card Content: Icon centered, Title centered underneath
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: primaryColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              tool['icon'] as IconData,
+                              color: primaryColor,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            tool['title'] as String,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: textPrimaryColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            tool['desc'] as String? ?? '',
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: textSecondaryColor,
+                              fontSize: 10.5,
+                              height: 1.25,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showAddFavoriteToolSheet(BuildContext context, List<Map<String, dynamic>> tools) {
+    final theme = Theme.of(context);
+    final cardBg = theme.cardColor;
+    final primaryColor = theme.primaryColor;
+    final textPrimaryColor = theme.textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = theme.textTheme.bodyMedium?.color ?? Colors.grey;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Obx(() {
+          final favIds = controller.favoriteTools;
+          final availableTools = tools.where((t) => !favIds.contains(t['id'])).toList();
+
+          return SafeArea(
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.75,
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: primaryColor.withOpacity(0.08),
-                      shape: BoxShape.circle,
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: theme.dividerColor.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                    child: Icon(tool['icon'], color: primaryColor, size: 20),
                   ),
-                  const Spacer(),
                   Text(
-                    tool['title'],
-                    style: TextStyle(color: textPrimaryColor, fontSize: 13, fontWeight: FontWeight.bold),
+                    'pin_tool_title'.tr,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: textPrimaryColor,
+                    ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 6),
                   Text(
-                    tool['desc'],
-                    style: TextStyle(color: textSecondaryColor, fontSize: 10),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    'pin_tool_desc'.tr,
+                    style: TextStyle(fontSize: 12, color: textSecondaryColor),
                   ),
+                  const SizedBox(height: 14),
+                  if (availableTools.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text(
+                          'all_tools_pinned'.tr,
+                          style: TextStyle(color: textSecondaryColor, fontSize: 13),
+                        ),
+                      ),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: availableTools.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (c, i) {
+                          final tool = availableTools[i];
+                          return ListTile(
+                            leading: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: primaryColor.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(tool['icon'] as IconData, color: primaryColor, size: 20),
+                            ),
+                            title: Text(
+                              tool['title'] as String,
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textPrimaryColor),
+                            ),
+                            subtitle: Text(
+                              tool['desc'] as String? ?? '',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 11, color: textSecondaryColor),
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.add_circle_outline_rounded),
+                              color: primaryColor,
+                              onPressed: () {
+                                controller.toggleFavoriteTool(tool['id'] as String);
+                                if (controller.favoriteTools.length >= 6) {
+                                  Navigator.pop(ctx);
+                                }
+                              },
+                            ),
+                            onTap: () {
+                              controller.toggleFavoriteTool(tool['id'] as String);
+                              if (controller.favoriteTools.length >= 6) {
+                                Navigator.pop(ctx);
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
                 ],
               ),
-            );
-          },
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  void _showShortcutOptionsSheet(BuildContext context, Map<String, dynamic> tool) {
+    final theme = Theme.of(context);
+    final cardBg = theme.cardColor;
+    final primaryColor = theme.primaryColor;
+    final textPrimaryColor = theme.textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = theme.textTheme.bodyMedium?.color ?? Colors.grey;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: theme.dividerColor.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: primaryColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(tool['icon'] as IconData, color: primaryColor, size: 22),
+                  ),
+                  title: Text(
+                    tool['title'] as String,
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: textPrimaryColor),
+                  ),
+                  subtitle: Text(
+                    tool['desc'] as String? ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: textSecondaryColor),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  leading: const Icon(Icons.open_in_new_rounded),
+                  title: Text('open_tool'.tr),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    final VoidCallback? onTap = tool['action'] as VoidCallback?;
+                    onTap?.call();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                  title: Text(
+                    'remove_shortcut'.tr,
+                    style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    controller.toggleFavoriteTool(tool['id'] as String);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showComingSoonDialog(BuildContext context, String toolName) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.info_outline_rounded, color: Colors.blueAccent),
+            const SizedBox(width: 8),
+            Text(toolName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
         ),
-        const SizedBox(height: 100),
-      ],
+        content: Text(
+          'coming_soon_dialog_desc'.tr,
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('got_it'.tr),
+          ),
+        ],
+      ),
     );
   }
 
@@ -359,9 +731,21 @@ class HomeView extends GetView<HomeController> {
   }
 
   Widget _buildRecentsTab(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final primaryColor = theme.primaryColor;
+    final cardBg = theme.cardColor;
+    final borderCol = theme.dividerColor;
+    final textPrimaryColor = theme.textTheme.bodyLarge?.color ?? Colors.black;
+
+    final tools = _getToolsList(context);
+
     return Obx(() {
       final recents = controller.recentItems;
-      if (recents.isEmpty) {
+      final favToolIds = controller.favoriteTools;
+      final favTools = tools.where((t) => favToolIds.contains(t['id'])).toList();
+
+      if (recents.isEmpty && favTools.isEmpty) {
         return _buildEmptyState(
           context,
           Icons.history_rounded,
@@ -369,7 +753,173 @@ class HomeView extends GetView<HomeController> {
           'empty_recents_desc'.tr,
         );
       }
-      return _buildItemsList(context, recents);
+
+      final showAddButton = favTools.length < 6;
+      final totalGridItems = favTools.length + (showAddButton ? 1 : 0);
+
+      Widget favoritesSection = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Icon(Icons.bolt_rounded, color: primaryColor, size: 20),
+                const SizedBox(width: 6),
+                Text(
+                  'tool_shortcuts'.tr,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: textPrimaryColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: MediaQuery.of(context).size.width < 360 ? 1.25 : 1.4, // Responsive ratio for compact & standard screens
+              ),
+              itemCount: totalGridItems,
+              itemBuilder: (ctx, idx) {
+                if (idx < favTools.length) {
+                  final tool = favTools[idx];
+                  final VoidCallback? onTap = tool['action'] as VoidCallback?;
+
+                  return Material(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(12),
+                    elevation: 0,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: onTap,
+                      onLongPress: () => _showShortcutOptionsSheet(context, tool),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF22304D) : borderCol.withValues(alpha: 0.3),
+                            width: 1.0,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Icon(
+                              tool['icon'] as IconData,
+                              color: primaryColor,
+                              size: 20,
+                            ),
+                            const SizedBox(height: 5),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              child: Text(
+                                tool['title'] as String,
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: textPrimaryColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                } else {
+                  // (+) Add pinned tool button
+                  return Material(
+                    color: isDark ? const Color(0xFF162032) : primaryColor.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => _showAddFavoriteToolSheet(context, tools),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: primaryColor.withValues(alpha: 0.35),
+                            width: 1.0,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.add_rounded,
+                              color: primaryColor,
+                              size: 22,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'add_tool'.tr,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                                color: primaryColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+      );
+
+      if (favTools.isEmpty && recents.isEmpty) {
+        return _buildEmptyState(
+          context,
+          Icons.history_rounded,
+          'recents'.tr,
+          'empty_recents_desc'.tr,
+        );
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          favoritesSection,
+          if (recents.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              child: Text(
+                'recents'.tr,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: textPrimaryColor,
+                ),
+              ),
+            ),
+            Expanded(child: _buildItemsList(context, recents)),
+          ],
+        ],
+      );
     });
   }
 
@@ -457,7 +1007,7 @@ class HomeView extends GetView<HomeController> {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 0.88,
+            childAspectRatio: width < 360 ? 0.82 : (width > 600 ? 0.95 : 0.88),
           ),
           itemCount: items.length,
           itemBuilder: (context, index) {
@@ -608,22 +1158,28 @@ class HomeView extends GetView<HomeController> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              IconButton(
-                icon: Icon(Icons.arrow_back_rounded, color: primaryColor),
-                onPressed: controller.clearSelection,
-              ),
-              const SizedBox(width: 8),
-              Obx(() => Text(
-                    '${controller.selectedPaths.length} ${"selected".tr}',
-                    style: TextStyle(
-                      color: textPrimaryColor,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )),
-            ],
+          Expanded(
+            child: Row(
+              children: [
+                IconButton(
+                  icon: Icon(Icons.arrow_back_rounded, color: primaryColor),
+                  onPressed: controller.clearSelection,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Obx(() => Text(
+                        '${controller.selectedPaths.length} ${"selected".tr}',
+                        style: TextStyle(
+                          color: textPrimaryColor,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      )),
+                ),
+              ],
+            ),
           ),
           Obx(() {
             final activeItems = controller.getActiveTabItems();

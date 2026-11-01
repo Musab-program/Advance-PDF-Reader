@@ -215,7 +215,7 @@ class SettingsView extends GetView<SettingsController> {
                     style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.w600),
                   ),
                   subtitle: const Text(
-                    'v2.0.0 (Premium)',
+                    'v3.0.0 (Premium)',
                     style: TextStyle(fontSize: 13),
                   ),
                   trailing: Icon(Icons.chevron_right_rounded, color: textSecondaryColor),

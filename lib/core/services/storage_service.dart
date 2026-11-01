@@ -110,6 +110,38 @@ class StorageService {
     }
     _box.write('recent_files', jsonEncode(jsonList));
   }
+  // ── Favorite Tools Persistence ──
+  List<String> getFavoriteTools() {
+    final list = _box.read<List<dynamic>>('favorite_tools');
+    if (list != null) {
+      return list.map((e) => e.toString()).toList();
+    }
+    return [];
+  }
+
+  void saveFavoriteTools(List<String> toolIds) {
+    _box.write('favorite_tools', toolIds);
+  }
+
+  bool isToolFavorite(String toolId) {
+    return getFavoriteTools().contains(toolId);
+  }
+
+  bool toggleFavoriteTool(String toolId) {
+    final list = getFavoriteTools();
+    if (list.contains(toolId)) {
+      list.remove(toolId);
+      saveFavoriteTools(list);
+      return false;
+    } else {
+      if (list.length >= 6) {
+        return false;
+      }
+      list.add(toolId);
+      saveFavoriteTools(list);
+      return true;
+    }
+  }
 
   List<Map<String, dynamic>> getRecentFiles() {
     final raw = _box.read<String>('recent_files');
