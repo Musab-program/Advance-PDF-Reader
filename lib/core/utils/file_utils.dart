@@ -14,6 +14,7 @@ class FileUtils {
     '.pptx',
     '.txt',
     '.html',
+    '.htm',
     // Others/Additional document formats
     '.epub',
     '.mobi',

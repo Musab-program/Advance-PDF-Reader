@@ -131,7 +131,7 @@ class MainDrawer extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(20.0),
             child: Text(
-              'v2.0.0',
+              'v3.0.0',
               style: TextStyle(color: textSecondaryColor.withOpacity(0.5), fontSize: 12),
             ),
           ),

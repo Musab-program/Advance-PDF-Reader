@@ -39,7 +39,8 @@ class ReaderOverlay extends GetView<ReaderController> {
                             if (!isSearch) ...[
                               // Standard View Left: Back Button
                               IconButton(
-                                icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
                                 onPressed: () => Get.back(),
                               ),
                               Expanded(
@@ -77,21 +78,25 @@ class ReaderOverlay extends GetView<ReaderController> {
                               ),
                               // Standard View Right: Drawer, Search, Orientation, Three-Dots
                               IconButton(
+                                visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.menu, color: Colors.white),
                                 tooltip: 'reading_queue'.tr,
                                 onPressed: () => Scaffold.of(context).openDrawer(),
                               ),
                               IconButton(
+                                visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.search_rounded, color: Colors.white),
                                 tooltip: 'search_text_hint'.tr,
                                 onPressed: controller.toggleSearchMode,
                               ),
                               IconButton(
+                                visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.screen_rotation_rounded, color: Colors.white),
                                 tooltip: 'rotate_screen'.tr,
                                 onPressed: controller.toggleOrientation,
                               ),
                               IconButton(
+                                visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
                                 tooltip: 'tools'.tr,
                                 onPressed: () {

@@ -44,6 +44,9 @@ class FolderController extends GetxController {
       isSelectionMode.value = true;
     } else {
       selectedPaths.remove(path);
+      if (selectedPaths.isEmpty) {
+        isSelectionMode.value = false;
+      }
     }
   }
 
@@ -71,12 +74,17 @@ class FolderController extends GetxController {
         selectedPaths.remove(pdf.path);
         getRxSelected(pdf.path).value = false;
       }
+      if (selectedPaths.isEmpty) {
+        isSelectionMode.value = false;
+      }
     } else {
       for (final pdf in filteredPdfFiles) {
         selectedPaths.add(pdf.path);
         getRxSelected(pdf.path).value = true;
       }
-      isSelectionMode.value = true;
+      if (selectedPaths.isNotEmpty) {
+        isSelectionMode.value = true;
+      }
     }
   }
 
@@ -176,8 +184,11 @@ class FolderController extends GetxController {
   Future<void> _loadFiles() async {
     isLoading.value = true;
     try {
+      final recycledPaths = _storageService.getRecycledItems().map((e) => e.path).toSet();
       final files = await FileUtils.scanPdfFiles(folderPath.value);
-      final List<PdfEntity> entities = files.map((file) {
+      final List<PdfEntity> entities = files
+          .where((file) => !recycledPaths.contains(file.path))
+          .map((file) {
         return PdfFileModel.fromFile(
           file,
           progress: _storageService.getProgress(file.path),
@@ -276,13 +287,37 @@ class FolderController extends GetxController {
     }
   }
 
-  /// Open a specific PDF in the reader
+  /// Open a specific document in its appropriate viewer (PDF reader or Office/HTML/TXT viewer)
   void openPdf(PdfEntity pdf) {
+    final ext = (pdf.extension.isNotEmpty ? pdf.extension : p.extension(pdf.path))
+        .toUpperCase()
+        .replaceAll('.', '');
+
+    if (ext != 'PDF') {
+      if (Get.isRegistered<HomeController>()) {
+        final homeController = Get.find<HomeController>();
+        homeController
+            .openFile(LibraryItem(
+              path: pdf.path,
+              name: pdf.name,
+              type: LibraryItemType.file,
+              size: pdf.size,
+              extension: ext,
+              dateModified: pdf.lastRead ?? DateTime.now(),
+            ))
+            .then((_) => refreshProgress());
+        return;
+      }
+    }
+
     final originalIndex = pdfFiles.indexWhere((p) => p.path == pdf.path);
     if (originalIndex >= 0) {
       _storageService.setLastFolder(folderPath.value);
       _storageService.setLastFileIndex(originalIndex);
-      Get.toNamed('/reader', arguments: {'index': originalIndex})?.then((_) {
+      Get.toNamed('/reader', arguments: {
+        'singleFile': pdf.path,
+        'index': originalIndex,
+      })?.then((_) {
         refreshProgress();
       });
     }

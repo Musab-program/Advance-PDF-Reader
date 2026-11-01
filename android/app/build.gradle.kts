@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.pdf_reader"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     compileOptions {

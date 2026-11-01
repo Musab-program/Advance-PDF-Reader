@@ -61,7 +61,7 @@ class AboutView extends GetView<SettingsController> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '2.0.0 (Premium)\nFlutter Version',
+                  '3.0.0 (Premium)\nFlutter Version',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: textSecondaryColor,

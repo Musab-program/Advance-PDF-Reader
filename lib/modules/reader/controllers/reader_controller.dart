@@ -9,10 +9,12 @@ import 'package:path/path.dart' as p;
 import 'package:pdfrx/pdfrx.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:pdf_reader/core/services/external_pdf_handler.dart';
 import 'package:pdf_reader/core/services/storage_service.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/data/models/pdf_file_model.dart';
 import 'package:pdf_reader/domain/entities/pdf_entity.dart';
+import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
 
 enum ReadingTheme {
   white,
@@ -43,6 +45,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
   // ── Splash & Snapping Timers ──
   Timer? _splashTimeoutTimer;
+  Timer? _saveProgressTimer;
   Timer? _snappingTimer;
   bool _isRestoring = false;
 
@@ -89,8 +92,11 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     isMangaMode.value = _storageService.getMangaMode();
 
     final args = Get.arguments as Map<String, dynamic>?;
+    final pendingFile = ExternalPdfHandler.consumePendingFile();
 
-    if (args != null && args.containsKey('singleFile')) {
+    if (pendingFile != null && pendingFile.isNotEmpty) {
+      _loadFromFile(pendingFile);
+    } else if (args != null && args.containsKey('singleFile')) {
       _loadFromFile(args['singleFile'] as String);
     } else if (args != null && args.containsKey('index')) {
       currentIndex.value = args['index'] as int;
@@ -100,7 +106,11 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     }
   }
 
+  /// Public hook to hide the loading splash (e.g. when the document fails to load).
+  void dismissLoading() => _dismissSplash();
+
   void _initSearcher() {
+    if (!pdfViewerController.isReady) return;
     textSearcher?.dispose();
     textSearcher = PdfTextSearcher(pdfViewerController)..addListener(_onSearcherUpdate);
   }
@@ -128,52 +138,97 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     isLoading.value = true;
     try {
       final folderPath = _storageService.getLastFolder();
-      if (folderPath == null || folderPath.isEmpty) return;
+      if (folderPath == null || folderPath.isEmpty) {
+        isDocumentLoading.value = false;
+        return;
+      }
       final folderName = p.basename(folderPath);
-      final files = await FileUtils.scanPdfFiles(folderPath);
+      final recycledPaths = _storageService.getRecycledItems().map((e) => e.path).toSet();
+      final allFiles = await FileUtils.scanPdfFiles(folderPath);
+      final files = allFiles
+          .where((f) =>
+              p.extension(f.path).toLowerCase() == '.pdf' &&
+              !recycledPaths.contains(f.path))
+          .toList();
       final List<PdfEntity> mapped = files.map((f) => PdfFileModel.fromFile(f,
           progress: _storageService.getProgress(f.path),
           pageCount: _storageService.getPageCount(f.path))).toList();
       mapped.sort((a, b) => FileUtils.naturalCompare(a.name, b.name, folderName: folderName));
       pdfQueue.assignAll(mapped);
-      if (currentIndex.value >= pdfQueue.length) currentIndex.value = 0;
-      isSinglePageMode.value = false;
-    } catch (_) {} finally {
-      isLoading.value = false;
-      update();
-    }
-  }
-
-  Future<void> _loadFromFile(String filePath) async {
-    isLoading.value = true;
-    try {
-      final folderPath = p.dirname(filePath);
-      final folderName = p.basename(folderPath);
-      _storageService.setLastFolder(folderPath);
-      final files = await FileUtils.scanPdfFiles(folderPath);
-      final List<PdfEntity> mapped = files.map((f) => PdfFileModel.fromFile(f,
-          progress: _storageService.getProgress(f.path),
-          pageCount: _storageService.getPageCount(f.path))).toList();
-      mapped.sort((a, b) => FileUtils.naturalCompare(a.name, b.name, folderName: folderName));
-      pdfQueue.assignAll(mapped);
-      final idx = pdfQueue.indexWhere((pdf) => pdf.path == filePath);
-      currentIndex.value = idx >= 0 ? idx : 0;
+      if (pdfQueue.isEmpty) {
+        isDocumentLoading.value = false;
+      } else if (currentIndex.value >= pdfQueue.length) {
+        currentIndex.value = 0;
+      }
       isSinglePageMode.value = false;
     } catch (_) {
-      try {
-        final file = File(filePath);
-        if (await file.exists()) {
-          pdfQueue.assignAll([PdfFileModel.fromFile(file)]);
-          currentIndex.value = 0;
-        }
-      } catch (_) {}
+      isDocumentLoading.value = false;
     } finally {
       isLoading.value = false;
       update();
     }
   }
 
+  Future<void> _loadFromFile(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (await file.exists()) {
+        final initialPdf = PdfFileModel.fromFile(
+          file,
+          progress: _storageService.getProgress(file.path),
+          pageCount: _storageService.getPageCount(file.path),
+        );
+        pdfQueue.assignAll([initialPdf]);
+        currentIndex.value = 0;
+        isSinglePageMode.value = false;
+        isLoading.value = false;
+        update();
+      } else {
+        isLoading.value = false;
+        isDocumentLoading.value = false;
+        update();
+        return;
+      }
+    } catch (_) {
+      isLoading.value = false;
+      isDocumentLoading.value = false;
+      update();
+      return;
+    }
+
+    // Only scan sibling PDFs if the file is not in the temporary cache directory
+    if (!filePath.contains('/cache/')) {
+      unawaited(() async {
+        try {
+          final folderPath = p.dirname(filePath);
+          final folderName = p.basename(folderPath);
+          _storageService.setLastFolder(folderPath);
+          final allFiles = await FileUtils.scanPdfFiles(folderPath);
+          final files = allFiles
+              .where((f) => p.extension(f.path).toLowerCase() == '.pdf')
+              .toList();
+          if (files.isNotEmpty) {
+            final List<PdfEntity> mapped = files
+                .map((f) => PdfFileModel.fromFile(f,
+                    progress: _storageService.getProgress(f.path),
+                    pageCount: _storageService.getPageCount(f.path)))
+                .toList();
+            mapped.sort((a, b) =>
+                FileUtils.naturalCompare(a.name, b.name, folderName: folderName));
+            final idx = mapped.indexWhere((pdf) => pdf.path == filePath);
+            if (idx >= 0) {
+              pdfQueue.assignAll(mapped);
+              currentIndex.value = idx;
+              update();
+            }
+          }
+        } catch (_) {}
+      }());
+    }
+  }
+
   void loadFromFileFromIntent(String filePath) {
+    _resetViewer();
     _loadFromFile(filePath);
   }
 
@@ -281,7 +336,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
           Offset(targetCenterX, targetCenterY),
           zoom: zoom,
           viewSize: viewSize,
-        ).scaled(1.0, 1.0, zoom);
+        );
       }
     } catch (_) {}
     return null;
@@ -321,13 +376,18 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   }
 
   // ── Called when pdfrx reports the page count ──
-  void onDocumentReady(PdfDocument document) {
+  void onDocumentReady(PdfDocument document, [PdfViewerController? vController]) {
+    final controller = vController ?? pdfViewerController;
+    _initSearcher();
     totalPages.value = document.pages.length;
 
     if (pdfQueue.isNotEmpty && currentIndex.value < pdfQueue.length) {
       final pdf = pdfQueue[currentIndex.value];
       _storageService.savePageCount(pdf.path, totalPages.value);
       _storageService.addRecentFile(pdf.path, pdf.name);
+      if (Get.isRegistered<HomeController>()) {
+        Get.find<HomeController>().loadRecentItems();
+      }
 
       final initialPage = getInitialPage(pdf.path);
       currentPage.value = initialPage;
@@ -355,35 +415,67 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
       } catch (_) {}
     }
 
-    // Calculate dynamic delay based on file size to ensure PDF page rendering finishes under splash
-    int delayMs = 1400; // Base delay of 1.4s for files <= 12MB
-    if (pdfQueue.isNotEmpty && currentIndex.value < pdfQueue.length) {
+    // ── Ensure all page dimensions are loaded and 100% Fit-to-Width is applied BEFORE dismissing splash ──
+    _splashTimeoutTimer?.cancel();
+    _saveProgressTimer?.cancel();
+    _splashTimeoutTimer = Timer(const Duration(milliseconds: 1500), () {
+      _dismissSplash();
+    });
+
+    void applyFullWidthMatrix() {
       try {
-        final pdf = pdfQueue[currentIndex.value];
-        final file = File(pdf.path);
-        if (file.existsSync()) {
-          final bytes = file.lengthSync();
-          final megaBytes = bytes / (1024 * 1024);
-          if (megaBytes > 12.0) {
-            final double extraMB = megaBytes - 12.0;
-            // Add 25ms per additional MB, capped at 5000ms max (5 seconds)
-            delayMs = (1400 + extraMB * 25.0).clamp(1400.0, 5000.0).toInt();
+        if (controller.isReady) {
+          final viewSize = controller.viewSize;
+          final docWidth = controller.layout.documentSize.width;
+          final viewWidth = viewSize.width;
+
+          if (viewWidth > 0 && docWidth > 0) {
+            final double fitZoom = viewWidth / docWidth;
+            final layouts = controller.layout.pageLayouts;
+            if (layouts.isNotEmpty) {
+              final int initialPage = currentPage.value;
+              final pageIndex = (initialPage - 1).clamp(0, layouts.length - 1);
+              final pageRect = layouts[pageIndex];
+
+              // Center horizontally and align vertically to top of target page
+              final double targetCenterY = pageRect.top + (viewSize.height / 2 / fitZoom);
+              final targetCenter = Offset(docWidth / 2, targetCenterY);
+
+              final targetMatrix = controller.calcMatrixFor(
+                targetCenter,
+                zoom: fitZoom,
+                viewSize: viewSize,
+              );
+              controller.value = targetMatrix;
+            }
           }
         }
       } catch (_) {}
     }
 
-    // Set a dynamic safe delay to dismiss the splash screen
-    _splashTimeoutTimer?.cancel();
-    _splashTimeoutTimer = Timer(Duration(milliseconds: delayMs), () {
-      _dismissSplash();
-    });
+    Future<void> prepareAndReveal() async {
+      applyFullWidthMatrix();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        applyFullWidthMatrix();
+        _dismissSplash();
+      });
+
+      // Continue background progressive page caching without blocking viewer reveal
+      try {
+        if (!document.pages.every((p) => p.isLoaded)) {
+          unawaited(document.loadPagesProgressively());
+        }
+      } catch (_) {}
+    }
+
+    prepareAndReveal();
   }
 
   void _dismissSplash() {
     if (isDocumentLoading.value) {
       isDocumentLoading.value = false;
       _splashTimeoutTimer?.cancel();
+    _saveProgressTimer?.cancel();
       update();
     }
   }
@@ -391,7 +483,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   // ── Scroll Snapping & Gesture Velocity Calculations ──
   int getClosestPage() {
     try {
-      if (pdfViewerController.layout == null) return currentPage.value;
+      if (!pdfViewerController.isReady) return currentPage.value;
       final centerPos = pdfViewerController.centerPosition;
       final layouts = pdfViewerController.layout.pageLayouts;
       
@@ -415,7 +507,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   void handleInteractionEnd(ScaleEndDetails details) {
     try {
       if (!pdfViewerController.isReady) return;
-      if (pdfViewerController.layout == null) return;
+      if (!pdfViewerController.isReady) return;
       
       // Disable snapping completely in vertical scroll mode to let continuous inertial scrolling run smoothly
       if (!isSinglePageMode.value) {
@@ -423,11 +515,18 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
       }
       
       final currentZoom = pdfViewerController.currentZoom;
-      final minScale = pdfViewerController.minScale;
+      final layouts = pdfViewerController.layout.pageLayouts;
+      final int pageIdx = (currentPage.value - 1).clamp(0, layouts.isNotEmpty ? layouts.length - 1 : 0);
+      final double refWidth = layouts.isNotEmpty
+          ? layouts[pageIdx].width
+          : pdfViewerController.layout.documentSize.width;
+      final double fitWidthZoom = refWidth > 0
+          ? pdfViewerController.viewSize.width / refWidth
+          : pdfViewerController.minScale;
       
-      // Snapping is only active when zoomed out (close to standard reading view)
-      if (currentZoom > minScale + 0.08) {
-        return; // Allow free-form panning when zoomed in
+      // Snapping is only active when not zoomed in past Fit-to-Width
+      if (currentZoom > fitWidthZoom * 1.02) {
+        return; // Allow free-form panning and zooming when zoomed in
       }
       
       final bool isHorizontal = isSinglePageMode.value;
@@ -494,9 +593,13 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     if (page == currentPage.value) return;
     currentPage.value = page;
 
+    // Debounce saving progress to disk (500ms) to prevent I/O stuttering while flinging through pages
     if (totalPages.value > 0 && pdfQueue.isNotEmpty) {
       final pdf = pdfQueue[currentIndex.value];
-      _storageService.saveProgress(pdf.path, page / totalPages.value);
+      _saveProgressTimer?.cancel();
+      _saveProgressTimer = Timer(const Duration(milliseconds: 500), () {
+        _storageService.saveProgress(pdf.path, page / totalPages.value);
+      });
     }
   }
 
@@ -548,6 +651,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     _isRestoring = false;
     clearSavedPosition();
     _splashTimeoutTimer?.cancel();
+    _saveProgressTimer?.cancel();
     _snappingTimer?.cancel();
     _initSearcher();
     update();
@@ -558,6 +662,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     matrixAnimationController.dispose();
     _savedPositionClearTimer?.cancel();
     _splashTimeoutTimer?.cancel();
+    _saveProgressTimer?.cancel();
     _snappingTimer?.cancel();
     // Restore status bar and orientation on exit
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -594,7 +699,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
   void handleDoubleTapZoom(Offset localPosition, Size viewportSize) {
     try {
-      if (pdfViewerController.layout == null) return;
+      if (!pdfViewerController.isReady) return;
       
       final currentMatrix = pdfViewerController.value;
       final double scale = currentMatrix.storage[0];
@@ -605,25 +710,34 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
       final double docX = (localPosition.dx - tx) / scale;
       final double docY = (localPosition.dy - ty) / scale;
       
-      // Calculate dynamic fit-width zoom scale relative to the document size
-      final double fitWidthZoom = viewportSize.width / pdfViewerController.layout.documentSize.width;
-      final double zoomedInZoom = fitWidthZoom * 2.0;
+      // Calculate dynamic fit-width zoom scale relative to the active page or document width
+      final layouts = pdfViewerController.layout.pageLayouts;
+      final int pageIdx = (currentPage.value - 1).clamp(0, layouts.isNotEmpty ? layouts.length - 1 : 0);
+      final double refWidth = (isSinglePageMode.value && layouts.isNotEmpty)
+          ? layouts[pageIdx].width
+          : pdfViewerController.layout.documentSize.width;
+      final double centerX = (isSinglePageMode.value && layouts.isNotEmpty)
+          ? layouts[pageIdx].center.dx
+          : pdfViewerController.layout.documentSize.width / 2;
+
+      final double fitWidthZoom = refWidth > 0 ? viewportSize.width / refWidth : 1.0;
+      final double zoomedInZoom = fitWidthZoom * 2.5;
       
       double targetZoom;
       Offset targetCenter;
       
-      if (scale < fitWidthZoom - 0.01) {
+      if (scale < fitWidthZoom * 0.98) {
         // State 1: Zoomed out -> restore to exactly fit-width
         targetZoom = fitWidthZoom;
-        targetCenter = Offset(pdfViewerController.layout.documentSize.width / 2, docY);
-      } else if (scale < fitWidthZoom + 0.05) {
-        // State 2: Normal fit-width size -> zoom in to exactly 2x of fit-width zoom centered at tapped point
+        targetCenter = Offset(centerX, docY);
+      } else if (scale < fitWidthZoom * 1.05) {
+        // State 2: Normal fit-width size -> zoom in to 2.5x of fit-width zoom centered at tapped point
         targetZoom = zoomedInZoom;
         targetCenter = Offset(docX, docY);
       } else {
         // State 3: Zoomed in -> zoom out back to exactly fit-width
         targetZoom = fitWidthZoom;
-        targetCenter = Offset(pdfViewerController.layout.documentSize.width / 2, docY);
+        targetCenter = Offset(centerX, docY);
       }
       
       final targetMatrix = pdfViewerController.calcMatrixFor(
@@ -643,6 +757,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
   // ── Text Search API ──
   void startSearch(String text) {
+    if (textSearcher == null) _initSearcher();
     searchQuery.value = text;
     if (text.isEmpty) {
       clearSearch();
@@ -1318,3 +1433,5 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     );
   }
 }
+
+// Reader controller optimizations applied successfully.

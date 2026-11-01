@@ -10,6 +10,12 @@ import 'package:pdf_reader/modules/settings/controllers/settings_controller.dart
 import 'package:pdf_reader/modules/settings/views/settings_view.dart';
 import 'package:pdf_reader/modules/txt_reader/controllers/txt_reader_controller.dart';
 import 'package:pdf_reader/modules/txt_reader/views/txt_reader_view.dart';
+import 'package:pdf_reader/modules/html_reader/controllers/html_reader_controller.dart';
+import 'package:pdf_reader/modules/html_reader/views/html_reader_view.dart';
+import 'package:pdf_reader/modules/xml_reader/controllers/xml_reader_controller.dart';
+import 'package:pdf_reader/modules/xml_reader/views/xml_reader_view.dart';
+import 'package:pdf_reader/modules/office_viewer/controllers/office_viewer_controller.dart';
+import 'package:pdf_reader/modules/office_viewer/views/office_viewer_view.dart';
 import 'package:pdf_reader/modules/search/controllers/search_controller.dart' as sc;
 import 'package:pdf_reader/modules/search/views/search_view.dart';
 import 'package:pdf_reader/modules/settings/views/about_view.dart';
@@ -53,6 +59,27 @@ class AppPages {
       page: () => const TxtReaderView(),
       binding: BindingsBuilder(() {
         Get.put<TxtReaderController>(TxtReaderController(), permanent: false);
+      }),
+    ),
+    GetPage(
+      name: Routes.HTML_READER,
+      page: () => const HtmlReaderView(),
+      binding: BindingsBuilder(() {
+        Get.put<HtmlReaderController>(HtmlReaderController(), permanent: false);
+      }),
+    ),
+    GetPage(
+      name: Routes.XML_READER,
+      page: () => const XmlReaderView(),
+      binding: BindingsBuilder(() {
+        Get.put<XmlReaderController>(XmlReaderController(), permanent: false);
+      }),
+    ),
+    GetPage(
+      name: Routes.OFFICE_VIEWER,
+      page: () => const OfficeViewerView(),
+      binding: BindingsBuilder(() {
+        Get.put<OfficeViewerController>(OfficeViewerController(), permanent: false);
       }),
     ),
     GetPage(
