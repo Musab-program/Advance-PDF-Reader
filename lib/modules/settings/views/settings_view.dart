@@ -2,8 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:pdf_reader/modules/settings/controllers/settings_controller.dart';
 import 'package:pdf_reader/routes/app_routes.dart';
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
 
 class SettingsView extends GetView<SettingsController> {
   const SettingsView({super.key});
@@ -261,84 +263,38 @@ class SettingsView extends GetView<SettingsController> {
   }
 
   void _showLanguageDialog(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-    final primaryColor = Theme.of(context).primaryColor;
-
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: AlignmentDirectional.topEnd,
-                child: GestureDetector(
-                  onTap: () => Get.back(),
-                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Icon(Icons.translate_rounded, color: primaryColor, size: 36),
-              const SizedBox(height: 12),
-              Text(
-                'language'.tr,
-                style: TextStyle(color: textPrimaryColor, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(1.5),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Obx(() => Column(
-                children: [
-                  _buildCustomLangTile(
-                    context,
-                    title: 'English',
-                    badge: 'E',
-                    isSelected: controller.currentLang.value == 'en',
-                    onTap: () {
-                      controller.setLanguage('en');
-                      Get.back();
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  _buildCustomLangTile(
-                    context,
-                    title: 'العربية',
-                    badge: 'ض',
-                    isSelected: controller.currentLang.value == 'ar',
-                    onTap: () {
-                      controller.setLanguage('ar');
-                      Get.back();
-                    },
-                  ),
-                ],
-              )),
-            ],
-          ),
-        ),
+    LuxuryDialog.showCustom(
+      context,
+      builder: (dCtx) => LuxuryDialog(
+        compact: true,
+        icon: Icons.translate_rounded,
+        title: 'language'.tr,
+        showActions: false,
+        body: Obx(() => Column(
+          children: [
+            _buildCustomLangTile(
+              dCtx,
+              title: 'English',
+              badge: 'E',
+              isSelected: controller.currentLang.value == 'en',
+              onTap: () {
+                controller.setLanguage('en');
+                Navigator.of(dCtx).pop();
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildCustomLangTile(
+              dCtx,
+              title: 'العربية',
+              badge: 'ض',
+              isSelected: controller.currentLang.value == 'ar',
+              onTap: () {
+                controller.setLanguage('ar');
+                Navigator.of(dCtx).pop();
+              },
+            ),
+          ],
+        )),
       ),
     );
   }
@@ -400,95 +356,49 @@ class SettingsView extends GetView<SettingsController> {
   }
 
   void _showThemeDialog(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-    final primaryColor = Theme.of(context).primaryColor;
-
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: AlignmentDirectional.topEnd,
-                child: GestureDetector(
-                  onTap: () => Get.back(),
-                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Icon(Icons.style_rounded, color: primaryColor, size: 36),
-              const SizedBox(height: 12),
-              Text(
-                'theme'.tr,
-                style: TextStyle(color: textPrimaryColor, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(1.5),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Obx(() => Column(
-                children: [
-                  _buildCustomThemeTile(
-                    context,
-                    title: 'system_mode'.tr,
-                    icon: Icons.settings_brightness_rounded,
-                    isSelected: controller.themeMode.value == 'system',
-                    onTap: () {
-                      controller.setThemeMode('system');
-                      Get.back();
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  _buildCustomThemeTile(
-                    context,
-                    title: 'light_mode'.tr,
-                    icon: Icons.wb_sunny_rounded,
-                    isSelected: controller.themeMode.value == 'light',
-                    onTap: () {
-                      controller.setThemeMode('light');
-                      Get.back();
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  _buildCustomThemeTile(
-                    context,
-                    title: 'dark_mode'.tr,
-                    icon: Icons.nightlight_round,
-                    isSelected: controller.themeMode.value == 'dark',
-                    onTap: () {
-                      controller.setThemeMode('dark');
-                      Get.back();
-                    },
-                  ),
-                ],
-              )),
-            ],
-          ),
-        ),
+    LuxuryDialog.showCustom(
+      context,
+      builder: (dCtx) => LuxuryDialog(
+        compact: true,
+        icon: Icons.style_rounded,
+        title: 'theme'.tr,
+        showActions: false,
+        body: Obx(() => Column(
+          children: [
+            _buildCustomThemeTile(
+              dCtx,
+              title: 'system_mode'.tr,
+              icon: Icons.settings_brightness_rounded,
+              isSelected: controller.themeMode.value == 'system',
+              onTap: () {
+                controller.setThemeMode('system');
+                Navigator.of(dCtx).pop();
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildCustomThemeTile(
+              dCtx,
+              title: 'light_mode'.tr,
+              icon: Icons.wb_sunny_rounded,
+              isSelected: controller.themeMode.value == 'light',
+              onTap: () {
+                controller.setThemeMode('light');
+                Navigator.of(dCtx).pop();
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildCustomThemeTile(
+              dCtx,
+              title: 'dark_mode'.tr,
+              icon: Icons.nightlight_round,
+              isSelected: controller.themeMode.value == 'dark',
+              onTap: () {
+                controller.setThemeMode('dark');
+                Navigator.of(dCtx).pop();
+              },
+            ),
+          ],
+        )),
       ),
     );
   }
@@ -543,244 +453,88 @@ class SettingsView extends GetView<SettingsController> {
   }
 
   void _showFontFamilyDialog(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-    final primaryColor = Theme.of(context).primaryColor;
-
     final List<String> fonts = ['System', 'Cairo', 'Tajawal', 'Almarai', 'Amiri', 'Roboto'];
 
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: AlignmentDirectional.topEnd,
-                child: GestureDetector(
-                  onTap: () => Get.back(),
-                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Icon(Icons.font_download_rounded, color: primaryColor, size: 36),
-              const SizedBox(height: 12),
-              Text(
-                'choose_font'.tr,
-                style: TextStyle(color: textPrimaryColor, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(1.5),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Obx(() => Column(
-                    children: fonts.map((font) {
-                      final isSelected = controller.themeController.fontFamily.value == font;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: InkWell(
-                          onTap: () {
-                            controller.setFontFamily(font);
-                            Get.back();
-                          },
-                          borderRadius: BorderRadius.circular(16),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: isSelected ? primaryColor.withOpacity(0.06) : Colors.transparent,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: isSelected ? primaryColor : Theme.of(context).dividerColor.withOpacity(0.15),
-                                width: isSelected ? 1.5 : 1.0,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor: isSelected ? primaryColor : Theme.of(context).dividerColor.withOpacity(0.1),
-                                  radius: 18,
-                                  child: Text(
-                                    font[0].toUpperCase(),
-                                    style: TextStyle(
-                                      color: isSelected ? Colors.white : textPrimaryColor,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        font == 'System' ? 'System (الافتراضي)' : font,
-                                        style: TextStyle(
-                                          color: textPrimaryColor,
-                                          fontSize: 15,
-                                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'أورا PDF - Aura',
-                                        style: font == 'System'
-                                            ? TextStyle(fontSize: 12, color: textSecondaryColor)
-                                            : GoogleFonts.getFont(
-                                                font,
-                                                textStyle: TextStyle(fontSize: 12, color: textSecondaryColor),
-                                              ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                if (isSelected)
-                                  Icon(Icons.check_circle_rounded, color: primaryColor, size: 20),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  )),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+    LuxuryDialog.showCustom(
+      context,
+      builder: (dCtx) {
+        final textPrimaryColor = Theme.of(dCtx).textTheme.bodyLarge?.color ?? Colors.black;
+        final textSecondaryColor = Theme.of(dCtx).textTheme.bodyMedium?.color ?? Colors.grey;
+        final primaryColor = Theme.of(dCtx).primaryColor;
 
-  void _showFontSizeDialog(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-    final primaryColor = Theme.of(context).primaryColor;
-
-    final List<Map<String, dynamic>> sizes = [
-      {'label': 'font_small'.tr, 'scale': 0.85, 'icon': Icons.text_fields_rounded},
-      {'label': 'font_medium'.tr, 'scale': 1.0, 'icon': Icons.text_fields_rounded},
-      {'label': 'font_large'.tr, 'scale': 1.15, 'icon': Icons.text_fields_rounded},
-      {'label': 'font_xlarge'.tr, 'scale': 1.3, 'icon': Icons.text_fields_rounded},
-    ];
-
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: AlignmentDirectional.topEnd,
-                child: GestureDetector(
-                  onTap: () => Get.back(),
-                  child: Icon(Icons.close_rounded, color: textSecondaryColor, size: 22),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Icon(Icons.format_size_rounded, color: primaryColor, size: 36),
-              const SizedBox(height: 12),
-              Text(
-                'choose_font_size'.tr,
-                style: TextStyle(color: textPrimaryColor, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(1.5),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Obx(() => Column(
-                children: sizes.map((size) {
-                  final isSelected = (controller.themeController.fontScale.value - (size['scale'] as double)).abs() < 0.05;
+        return LuxuryDialog(
+          compact: true,
+          icon: Icons.font_download_rounded,
+          title: 'choose_font'.tr,
+          showActions: false,
+          body: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 340),
+            child: SingleChildScrollView(
+              child: Obx(() => Column(
+                children: fonts.map((font) {
+                  final isSelected = controller.themeController.fontFamily.value == font;
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: InkWell(
                       onTap: () {
-                        controller.setFontSizeScale(size['scale'] as double);
-                        Get.back();
+                        controller.setFontFamily(font);
+                        Navigator.of(dCtx).pop();
                       },
                       borderRadius: BorderRadius.circular(16),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         decoration: BoxDecoration(
-                          color: isSelected ? primaryColor.withOpacity(0.06) : Colors.transparent,
+                          color: isSelected ? primaryColor.withValues(alpha: 0.08) : Colors.transparent,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: isSelected ? primaryColor : Theme.of(context).dividerColor.withOpacity(0.15),
+                            color: isSelected ? primaryColor : Theme.of(dCtx).dividerColor.withValues(alpha: 0.25),
                             width: isSelected ? 1.5 : 1.0,
                           ),
                         ),
                         child: Row(
                           children: [
-                            Icon(
-                              size['icon'] as IconData,
-                              color: isSelected ? primaryColor : textPrimaryColor.withOpacity(0.6),
-                              size: size['scale'] == 0.85
-                                  ? 16
-                                  : size['scale'] == 1.0
-                                      ? 20
-                                      : size['scale'] == 1.15
-                                          ? 24
-                                          : 28,
-                            ),
-                            const SizedBox(width: 14),
-                            Text(
-                              size['label'] as String,
-                              style: TextStyle(
-                                color: textPrimaryColor,
-                                fontSize: 15,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            CircleAvatar(
+                              backgroundColor: isSelected
+                                  ? primaryColor
+                                  : Theme.of(dCtx).dividerColor.withValues(alpha: 0.14),
+                              radius: 18,
+                              child: Text(
+                                font[0].toUpperCase(),
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : textPrimaryColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
                               ),
                             ),
-                            const Spacer(),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    font == 'System' ? 'System (الافتراضي)' : font,
+                                    style: TextStyle(
+                                      color: textPrimaryColor,
+                                      fontSize: 15,
+                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'أورا PDF - Aura',
+                                    style: font == 'System'
+                                        ? TextStyle(fontSize: 12, color: textSecondaryColor)
+                                        : GoogleFonts.getFont(
+                                            font,
+                                            textStyle: TextStyle(fontSize: 12, color: textSecondaryColor),
+                                          ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
                             if (isSelected)
                               Icon(Icons.check_circle_rounded, color: primaryColor, size: 20),
                           ],
@@ -790,37 +544,105 @@ class SettingsView extends GetView<SettingsController> {
                   );
                 }).toList(),
               )),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
+    );
+  }
+
+  void _showFontSizeDialog(BuildContext context) {
+    final List<Map<String, dynamic>> sizes = [
+      {'label': 'font_small'.tr, 'scale': 0.85, 'icon': Icons.text_fields_rounded},
+      {'label': 'font_medium'.tr, 'scale': 1.0, 'icon': Icons.text_fields_rounded},
+      {'label': 'font_large'.tr, 'scale': 1.15, 'icon': Icons.text_fields_rounded},
+      {'label': 'font_xlarge'.tr, 'scale': 1.3, 'icon': Icons.text_fields_rounded},
+    ];
+
+    LuxuryDialog.showCustom(
+      context,
+      builder: (dCtx) {
+        final textPrimaryColor = Theme.of(dCtx).textTheme.bodyLarge?.color ?? Colors.black;
+        final primaryColor = Theme.of(dCtx).primaryColor;
+
+        return LuxuryDialog(
+          compact: true,
+          icon: Icons.format_size_rounded,
+          title: 'choose_font_size'.tr,
+          showActions: false,
+          body: Obx(() => Column(
+            children: sizes.map((size) {
+              final isSelected = (controller.themeController.fontScale.value - (size['scale'] as double)).abs() < 0.05;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: InkWell(
+                  onTap: () {
+                    controller.setFontSizeScale(size['scale'] as double);
+                    Navigator.of(dCtx).pop();
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: isSelected ? primaryColor.withValues(alpha: 0.08) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSelected ? primaryColor : Theme.of(dCtx).dividerColor.withValues(alpha: 0.25),
+                        width: isSelected ? 1.5 : 1.0,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          size['icon'] as IconData,
+                          color: isSelected ? primaryColor : textPrimaryColor.withValues(alpha: 0.6),
+                          size: size['scale'] == 0.85
+                              ? 16
+                              : size['scale'] == 1.0
+                                  ? 20
+                                  : size['scale'] == 1.15
+                                      ? 24
+                                      : 28,
+                        ),
+                        const SizedBox(width: 14),
+                        Text(
+                          size['label'] as String,
+                          style: TextStyle(
+                            color: textPrimaryColor,
+                            fontSize: 15,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (isSelected)
+                          Icon(Icons.check_circle_rounded, color: primaryColor, size: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          )),
+        );
+      },
     );
   }
 
   void _confirmResetAppData(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-
-    Get.defaultDialog(
+    LuxuryDialog.show(
+      context,
+      compact: true,
+      accentColor: Colors.redAccent,
+      icon: Icons.restart_alt_rounded,
       title: 'reset_records'.tr,
-      middleText: 'reset_desc'.tr,
-      backgroundColor: cardBg,
-      titleStyle: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.bold),
-      middleTextStyle: TextStyle(color: textSecondaryColor),
-      textCancel: 'cancel'.tr,
-      textConfirm: 'confirm_reset'.tr,
-      confirmTextColor: Colors.white,
-      buttonColor: Colors.redAccent,
-      cancelTextColor: textSecondaryColor,
-      onConfirm: () {
+      message: 'reset_desc'.tr,
+      secondaryButtonText: 'cancel'.tr,
+      primaryButtonText: 'confirm_reset'.tr,
+      primaryButtonIcon: Icons.delete_sweep_rounded,
+      onPrimaryPressed: () {
         controller.resetAppRecords();
-        Get.back();
-        Get.snackbar(
-          'reset_records'.tr,
-          'reset_success'.tr,
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.showSuccess('reset_success'.tr);
       },
     );
   }

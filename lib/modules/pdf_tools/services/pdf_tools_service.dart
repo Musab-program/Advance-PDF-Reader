@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:image/image.dart' as img;
+import '../../../core/utils/pdf_text_layout.dart';
 import '../models/tool_task_result.dart';
 
 class PdfToolsService {
@@ -54,6 +56,47 @@ class PdfToolsService {
     return candidate;
   }
 
+  /// Convert rotation enum into turns (0, 1: 90°, 2: 180°, 3: 270°)
+  static int getRotationTurns(PdfPageRotateAngle angle) {
+    switch (angle) {
+      case PdfPageRotateAngle.rotateAngle90:
+        return 1;
+      case PdfPageRotateAngle.rotateAngle180:
+        return 2;
+      case PdfPageRotateAngle.rotateAngle270:
+        return 3;
+      case PdfPageRotateAngle.rotateAngle0:
+        return 0;
+    }
+  }
+
+  /// Convert rotation turns into Syncfusion rotation enum
+  static PdfPageRotateAngle getAngleFromTurns(int turns) {
+    switch (turns % 4) {
+      case 1:
+        return PdfPageRotateAngle.rotateAngle90;
+      case 2:
+        return PdfPageRotateAngle.rotateAngle180;
+      case 3:
+        return PdfPageRotateAngle.rotateAngle270;
+      case 0:
+      default:
+        return PdfPageRotateAngle.rotateAngle0;
+    }
+  }
+
+  /// Instantly register newly created files into Android MediaStore
+  static Future<void> notifyMediaStore(String filePath) async {
+    if (Platform.isAndroid) {
+      try {
+        const platform = MethodChannel('com.example.pdf_reader/content_resolver');
+        await platform.invokeMethod('scanMediaFile', {'filePath': filePath});
+      } catch (e) {
+        debugPrint('MediaScanner scan error: $e');
+      }
+    }
+  }
+
   /// 1. Merge multiple PDF files into one
   Future<ToolTaskResult> mergePdfs(
     List<String> inputPaths, {
@@ -74,6 +117,7 @@ class PdfToolsService {
 
     try {
       targetDoc = PdfDocument();
+      targetDoc.pageSettings.margins.all = 0;
       final totalFiles = inputPaths.length;
 
       for (int i = 0; i < totalFiles; i++) {
@@ -99,9 +143,18 @@ class PdfToolsService {
         }
 
         for (int pIdx = 0; pIdx < srcDoc.pages.count; pIdx++) {
-          final template = srcDoc.pages[pIdx].createTemplate();
-          final page = targetDoc.pages.add();
-          page.graphics.drawPdfTemplate(template, const ui.Offset(0, 0));
+          final srcPage = srcDoc.pages[pIdx];
+          final template = srcPage.createTemplate();
+          final section = targetDoc.sections!.add();
+          section.pageSettings.margins.all = 0;
+          section.pageSettings.size = srcPage.size;
+          section.pageSettings.orientation = srcPage.size.width > srcPage.size.height
+              ? PdfPageOrientation.landscape
+              : PdfPageOrientation.portrait;
+          section.pageSettings.rotate = srcPage.rotation;
+
+          final page = section.pages.add();
+          page.graphics.drawPdfTemplate(template, const ui.Offset(0, 0), srcPage.size);
         }
       }
 
@@ -116,6 +169,7 @@ class PdfToolsService {
       final outputBytes = await targetDoc.save();
       final outputFile = File(outputPath);
       await outputFile.writeAsBytes(outputBytes);
+      await notifyMediaStore(outputPath);
 
       stopwatch.stop();
       return ToolTaskResult(
@@ -187,11 +241,21 @@ class PdfToolsService {
         onProgress?.call((g / totalGroups), 'تصدير الجزء ${g + 1} من $totalGroups...');
 
         final splitDoc = PdfDocument();
+        splitDoc.pageSettings.margins.all = 0;
         for (final pageIdx in groupPages) {
           if (pageIdx >= 0 && pageIdx < totalPages) {
-            final template = srcDoc.pages[pageIdx].createTemplate();
-            final page = splitDoc.pages.add();
-            page.graphics.drawPdfTemplate(template, const ui.Offset(0, 0));
+            final srcPage = srcDoc.pages[pageIdx];
+            final template = srcPage.createTemplate();
+            final section = splitDoc.sections!.add();
+            section.pageSettings.margins.all = 0;
+            section.pageSettings.size = srcPage.size;
+            section.pageSettings.orientation = srcPage.size.width > srcPage.size.height
+                ? PdfPageOrientation.landscape
+                : PdfPageOrientation.portrait;
+            section.pageSettings.rotate = srcPage.rotation;
+
+            final page = section.pages.add();
+            page.graphics.drawPdfTemplate(template, const ui.Offset(0, 0), srcPage.size);
           }
         }
 
@@ -201,12 +265,15 @@ class PdfToolsService {
             ? 'page_$startPage'
             : 'pages_${startPage}_to_$endPage';
 
-        final partBaseName = '${origBase}_$partSuffix';
+        final partBaseName = (totalGroups == 1 && baseOutputName?.trim().isNotEmpty == true)
+            ? baseOutputName!.trim()
+            : '${origBase}_$partSuffix';
         final outPath = generateSafeFilePath(outputDir, partBaseName, '.pdf');
 
         final splitBytes = await splitDoc.save();
         final splitFile = File(outPath);
         await splitFile.writeAsBytes(splitBytes);
+        await notifyMediaStore(outPath);
         createdFiles.add(splitFile);
         splitDoc.dispose();
       }
@@ -265,23 +332,29 @@ class PdfToolsService {
       }
 
       newDoc = PdfDocument();
+      newDoc.pageSettings.margins.all = 0;
       final total = orderedPageIndices.length;
 
       for (int i = 0; i < total; i++) {
         final pageIdx = orderedPageIndices[i];
         if (pageIdx >= 0 && pageIdx < srcDoc.pages.count) {
           onProgress?.call((i / total) * 0.85, 'تنظيم الصفحة ${i + 1} من $total...');
-          final template = srcDoc.pages[pageIdx].createTemplate();
-          final page = newDoc.pages.add();
-          final turns = (pageRotations?[i] ?? 0) % 4;
-          if (turns == 1) {
-            page.rotation = PdfPageRotateAngle.rotateAngle90;
-          } else if (turns == 2) {
-            page.rotation = PdfPageRotateAngle.rotateAngle180;
-          } else if (turns == 3) {
-            page.rotation = PdfPageRotateAngle.rotateAngle270;
-          }
-          page.graphics.drawPdfTemplate(template, const ui.Offset(0, 0));
+          final srcPage = srcDoc.pages[pageIdx];
+          final template = srcPage.createTemplate();
+          final section = newDoc.sections!.add();
+          section.pageSettings.margins.all = 0;
+          section.pageSettings.size = srcPage.size;
+          section.pageSettings.orientation = srcPage.size.width > srcPage.size.height
+              ? PdfPageOrientation.landscape
+              : PdfPageOrientation.portrait;
+
+          final origTurns = getRotationTurns(srcPage.rotation);
+          final userTurns = (pageRotations?[i] ?? 0);
+          final totalTurns = (origTurns + userTurns) % 4;
+          section.pageSettings.rotate = getAngleFromTurns(totalTurns);
+
+          final page = section.pages.add();
+          page.graphics.drawPdfTemplate(template, const ui.Offset(0, 0), srcPage.size);
         }
       }
 
@@ -297,6 +370,7 @@ class PdfToolsService {
       final outputBytes = await newDoc.save();
       final outputFile = File(outputPath);
       await outputFile.writeAsBytes(outputBytes);
+      await notifyMediaStore(outputPath);
 
       stopwatch.stop();
       return ToolTaskResult(
@@ -336,9 +410,11 @@ class PdfToolsService {
     }
 
     PdfDocument? pdfDoc;
+    int processedCount = 0;
 
     try {
       pdfDoc = PdfDocument();
+      pdfDoc.pageSettings.margins.all = 0;
       final totalImages = imagePaths.length;
 
       for (int i = 0; i < totalImages; i++) {
@@ -350,22 +426,37 @@ class PdfToolsService {
 
         Uint8List imageBytes = await imgFile.readAsBytes();
 
-        // Safe decode and downscale if image is overwhelmingly large (> 4000px)
+        bool isJpegOrPng = false;
+        if (imageBytes.length >= 8) {
+          if (imageBytes[0] == 0xFF && imageBytes[1] == 0xD8 && imageBytes[2] == 0xFF) {
+            isJpegOrPng = true;
+          } else if (imageBytes[0] == 0x89 &&
+              imageBytes[1] == 0x50 &&
+              imageBytes[2] == 0x4E &&
+              imageBytes[3] == 0x47) {
+            isJpegOrPng = true;
+          }
+        }
+
+        // If not JPEG or PNG (e.g. WebP, BMP, GIF) or oversized (>3500px), decode and re-encode to JPEG
         try {
           final decoded = img.decodeImage(imageBytes);
           if (decoded != null) {
-            if (decoded.width > 3500 || decoded.height > 3500) {
-              final resized = img.copyResize(
-                decoded,
-                width: decoded.width > decoded.height ? 2500 : null,
-                height: decoded.height >= decoded.width ? 2500 : null,
-                interpolation: img.Interpolation.linear,
-              );
-              imageBytes = Uint8List.fromList(img.encodeJpg(resized, quality: 88));
+            if (!isJpegOrPng || decoded.width > 3500 || decoded.height > 3500) {
+              img.Image targetImg = decoded;
+              if (decoded.width > 3500 || decoded.height > 3500) {
+                targetImg = img.copyResize(
+                  decoded,
+                  width: decoded.width > decoded.height ? 2500 : null,
+                  height: decoded.height >= decoded.width ? 2500 : null,
+                  interpolation: img.Interpolation.linear,
+                );
+              }
+              imageBytes = Uint8List.fromList(img.encodeJpg(targetImg, quality: 90));
             }
           }
-        } catch (_) {
-          // If decoding fails, attempt raw pass to PdfBitmap
+        } catch (e) {
+          debugPrint('Image decoding/resizing note: $e');
         }
 
         PdfBitmap bitmap;
@@ -375,28 +466,46 @@ class PdfToolsService {
           throw Exception('صيغة صورة غير مدعومة أو ملف تالف: ${p.basename(imgPath)}');
         }
 
-        final page = pdfDoc.pages.add();
-        final pageWidth = page.size.width;
-        final pageHeight = page.size.height;
-
-        final availW = pageWidth - (margin * 2);
-        final availH = pageHeight - (margin * 2);
-
+        final section = pdfDoc.sections!.add();
+        section.pageSettings.margins.all = 0;
         final imgW = bitmap.width.toDouble();
         final imgH = bitmap.height.toDouble();
 
-        double renderW = availW;
-        double renderH = (availW / imgW) * imgH;
+        if (margin == 0.0) {
+          // Zero margins: match page size exactly to image dimensions
+          section.pageSettings.size = ui.Size(imgW, imgH);
+          section.pageSettings.orientation = imgW > imgH
+              ? PdfPageOrientation.landscape
+              : PdfPageOrientation.portrait;
+          final page = section.pages.add();
+          page.graphics.drawImage(bitmap, ui.Rect.fromLTWH(0, 0, imgW, imgH));
+        } else {
+          // Standard page with margin padding
+          final page = section.pages.add();
+          final pageWidth = page.size.width;
+          final pageHeight = page.size.height;
 
-        if (renderH > availH) {
-          renderH = availH;
-          renderW = (availH / imgH) * imgW;
+          final availW = pageWidth - (margin * 2);
+          final availH = pageHeight - (margin * 2);
+
+          double renderW = availW;
+          double renderH = (availW / imgW) * imgH;
+
+          if (renderH > availH) {
+            renderH = availH;
+            renderW = (availH / imgH) * imgW;
+          }
+
+          final posX = margin + ((availW - renderW) / 2);
+          final posY = margin + ((availH - renderH) / 2);
+
+          page.graphics.drawImage(bitmap, ui.Rect.fromLTWH(posX, posY, renderW, renderH));
         }
+        processedCount++;
+      }
 
-        final posX = margin + ((availW - renderW) / 2);
-        final posY = margin + ((availH - renderH) / 2);
-
-        page.graphics.drawImage(bitmap, ui.Rect.fromLTWH(posX, posY, renderW, renderH));
+      if (processedCount == 0) {
+        throw Exception('لم يتم العثور على أي صور صالحة للتحويل / No valid images found');
       }
 
       onProgress?.call(0.9, 'إنشاء ملف PDF النهائي...');
@@ -410,6 +519,7 @@ class PdfToolsService {
       final outputBytes = await pdfDoc.save();
       final outputFile = File(outputPath);
       await outputFile.writeAsBytes(outputBytes);
+      await notifyMediaStore(outputPath);
 
       stopwatch.stop();
       return ToolTaskResult(
@@ -439,6 +549,7 @@ class PdfToolsService {
     int jpgQuality = 85,
     double scale = 2.0,
     bool asLongPicture = false,
+    String? outputName,
     void Function(double progress, String status)? onProgress,
   }) async {
     final stopwatch = Stopwatch()..start();
@@ -460,7 +571,11 @@ class PdfToolsService {
 
       final outputBaseDir = await getOutputDir();
       final origBase = p.basenameWithoutExtension(inputPath);
-      final targetSubDirName = '${origBase}_images_${DateTime.now().millisecondsSinceEpoch}';
+      final sanitizedCustom = (outputName != null && outputName.trim().isNotEmpty)
+          ? outputName.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+          : origBase;
+      final prefix = sanitizedCustom.isEmpty ? origBase : sanitizedCustom;
+      final targetSubDirName = '${prefix}_${DateTime.now().millisecondsSinceEpoch}';
       final exportFolder = Directory(p.join(outputBaseDir.path, targetSubDirName));
       if (!await exportFolder.exists()) {
         await exportFolder.create(recursive: true);
@@ -469,57 +584,71 @@ class PdfToolsService {
       final totalToExport = pageNumbers.length;
 
       if (asLongPicture && totalToExport > 1) {
-        onProgress?.call(0.1, 'تصيير الصفحات لتجميع الصورة الطولية...');
-        final List<img.Image> decodedList = [];
+        onProgress?.call(0.05, 'حساب أبعاد الصورة الطولية...');
         int maxWidth = 0;
         int totalHeight = 0;
-
-        for (int i = 0; i < totalToExport; i++) {
-          final pNum = pageNumbers[i];
-          if (pNum < 1 || pNum > totalDocPages) continue;
-
-          onProgress?.call(0.1 + (i / totalToExport) * 0.7, 'معالجة الصفحة $pNum...');
-          final page = rxDoc.pages[pNum - 1];
-          final renderWidth = (page.width * scale).round();
-          final renderHeight = (page.height * scale).round();
-
-          final pageImage = await page.render(
-            width: renderWidth,
-            height: renderHeight,
-          );
-
-          if (pageImage != null) {
-            final uiImage = await pageImage.createImage();
-            final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-            pageImage.dispose();
-
-            if (byteData != null) {
-              final dImg = img.decodePng(byteData.buffer.asUint8List());
-              if (dImg != null) {
-                decodedList.add(dImg);
-                if (dImg.width > maxWidth) maxWidth = dImg.width;
-                totalHeight += dImg.height;
-              }
-            }
+        for (final pNum in pageNumbers) {
+          if (pNum >= 1 && pNum <= totalDocPages) {
+            final p = rxDoc.pages[pNum - 1];
+            final w = (p.width * scale).round();
+            final h = (p.height * scale).round();
+            if (w > maxWidth) maxWidth = w;
+            totalHeight += h;
           }
         }
 
-        if (decodedList.isNotEmpty) {
-          onProgress?.call(0.85, 'خياطة وتجميع الصورة الطولية...');
+        if (maxWidth > 0 && totalHeight > 0) {
           final stitched = img.Image(width: maxWidth, height: totalHeight);
           img.fill(stitched, color: img.ColorRgb8(255, 255, 255));
           int currentY = 0;
-          for (final pageImg in decodedList) {
-            final xOffset = (maxWidth - pageImg.width) ~/ 2;
-            img.compositeImage(stitched, pageImg, dstX: xOffset, dstY: currentY);
-            currentY += pageImg.height;
+
+          for (int i = 0; i < totalToExport; i++) {
+            final pNum = pageNumbers[i];
+            if (pNum < 1 || pNum > totalDocPages) continue;
+
+            onProgress?.call(0.1 + (i / totalToExport) * 0.7, 'معالجة الصفحة $pNum ($i من $totalToExport)...');
+            final page = rxDoc.pages[pNum - 1];
+            final renderWidth = (page.width * scale).round();
+            final renderHeight = (page.height * scale).round();
+
+            final pageImage = await page.render(
+              width: renderWidth,
+              height: renderHeight,
+            );
+
+            if (pageImage != null) {
+              final uiImage = await pageImage.createImage();
+              final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+              pageImage.dispose();
+
+              if (byteData != null) {
+                final dImg = img.decodePng(byteData.buffer.asUint8List());
+                if (dImg != null) {
+                  final xOffset = (maxWidth - dImg.width) ~/ 2;
+                  img.compositeImage(stitched, dImg, dstX: xOffset, dstY: currentY);
+                  currentY += dImg.height;
+                }
+              }
+            }
           }
 
-          onProgress?.call(0.95, 'حفظ الصورة الطولية...');
-          final outFilePath = p.join(exportFolder.path, '${origBase}_long_picture.jpg');
-          final jpgBytes = Uint8List.fromList(img.encodeJpg(stitched, quality: jpgQuality));
+          onProgress?.call(0.85, 'ترميز وحفظ الصورة الطولية...');
+          final isPng = format.toLowerCase() == 'png';
+          final ext = isPng ? 'png' : 'jpg';
+          final outFilePath = generateSafeFilePath(exportFolder, '${prefix}_long_picture', ext);
+
+          final outBytes = await compute(
+            _encodeImageTask,
+            _EncodeImageParams(
+              image: stitched,
+              isPng: isPng,
+              jpgQuality: jpgQuality,
+            ),
+          );
+
           final longPicFile = File(outFilePath);
-          await longPicFile.writeAsBytes(jpgBytes);
+          await longPicFile.writeAsBytes(outBytes);
+          await notifyMediaStore(longPicFile.path);
           exportedFiles.add(longPicFile);
         }
       } else {
@@ -547,22 +676,25 @@ class PdfToolsService {
               final pngBytes = byteData.buffer.asUint8List();
               final isJpg = format.toLowerCase() == 'jpg' || format.toLowerCase() == 'jpeg';
               final ext = isJpg ? 'jpg' : 'png';
-              final outFilePath = p.join(exportFolder.path, 'page_${pNum.toString().padLeft(3, '0')}.$ext');
+              final outFilePath = generateSafeFilePath(
+                exportFolder,
+                '${prefix}_page_${pNum.toString().padLeft(3, '0')}',
+                ext,
+              );
 
               Uint8List finalBytes;
               if (isJpg) {
-                final decodedImg = img.decodePng(pngBytes);
-                if (decodedImg != null) {
-                  finalBytes = Uint8List.fromList(img.encodeJpg(decodedImg, quality: jpgQuality));
-                } else {
-                  finalBytes = pngBytes;
-                }
+                finalBytes = await compute(
+                  _convertPngToJpgTask,
+                  _PngToJpgParams(pngBytes: pngBytes, jpgQuality: jpgQuality),
+                );
               } else {
                 finalBytes = pngBytes;
               }
 
               final outFile = File(outFilePath);
               await outFile.writeAsBytes(finalBytes);
+              await notifyMediaStore(outFile.path);
               exportedFiles.add(outFile);
             }
           }
@@ -588,4 +720,164 @@ class PdfToolsService {
       await rxDoc?.dispose();
     }
   }
+
+  /// 6. Compress PDF file and save safely to Aura_PDF_Tools
+  Future<ToolTaskResult> compressPdf(
+    String inputPath, {
+    String? outputFileName,
+    void Function(double progress, String status)? onProgress,
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    final file = File(inputPath);
+    if (!await file.exists()) {
+      return ToolTaskResult(isSuccess: false, errorMessage: 'الملف غير موجود / File not found');
+    }
+
+    try {
+      onProgress?.call(0.1, 'جاري قراءة وتحليل المستند...');
+      final bytes = await file.readAsBytes();
+      final origSize = bytes.length;
+
+      final sfDoc = PdfDocument(inputBytes: bytes);
+      sfDoc.compressionLevel = PdfCompressionLevel.best;
+
+      onProgress?.call(0.6, 'جاري ضغط مجاري البيانات والأشجار...');
+      final compressedBytes = await sfDoc.save();
+      sfDoc.dispose();
+
+      final compSize = compressedBytes.length;
+      final outputDir = await getOutputDir();
+      final origBase = p.basenameWithoutExtension(inputPath);
+      final baseName = outputFileName?.trim().isNotEmpty == true
+          ? outputFileName!.trim()
+          : '${origBase}_compressed';
+      final outputPath = generateSafeFilePath(outputDir, baseName, '.pdf');
+
+      final outputFile = File(outputPath);
+      await outputFile.writeAsBytes(compressedBytes);
+      await notifyMediaStore(outputPath);
+
+      stopwatch.stop();
+      String _formatSize(int b) {
+        if (b < 1024) return '$b B';
+        if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)} KB';
+        return '${(b / (1024 * 1024)).toStringAsFixed(2)} MB';
+      }
+
+      final origStr = _formatSize(origSize);
+      final compStr = _formatSize(compSize);
+
+      return ToolTaskResult(
+        isSuccess: true,
+        outputFiles: [outputFile],
+        outputDirectory: outputDir.path,
+        duration: stopwatch.elapsed,
+        message: 'تم ضغط الملف بنجاح ($origStr ◄ $compStr)',
+      );
+    } catch (e) {
+      stopwatch.stop();
+      return ToolTaskResult(
+        isSuccess: false,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+        duration: stopwatch.elapsed,
+      );
+    }
+  }
+
+  /// 7. Extract plain text from all pages into a .txt file safely in Aura_PDF_Tools
+  Future<ToolTaskResult> extractText(
+    String inputPath, {
+    String? outputFileName,
+    void Function(double progress, String status)? onProgress,
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    final file = File(inputPath);
+    if (!await file.exists()) {
+      return ToolTaskResult(isSuccess: false, errorMessage: 'الملف غير موجود / File not found');
+    }
+
+    pdfrx.PdfDocument? rxDoc;
+    try {
+      onProgress?.call(0.1, 'جاري فتح المستند لاستخراج النصوص...');
+      rxDoc = await pdfrx.PdfDocument.openFile(inputPath);
+      final total = rxDoc.pages.length;
+      final buffer = StringBuffer();
+
+      for (int i = 1; i <= total; i++) {
+        onProgress?.call(0.1 + (i / total) * 0.75, 'استخراج نصوص الصفحة $i من $total...');
+        final page = rxDoc.pages[i - 1];
+        final text = await PdfTextLayout.extractPageText(page);
+        if (i > 1) buffer.writeln();
+        buffer.writeln('--- Page $i ---');
+        if (text.isNotEmpty) {
+          buffer.writeln(text);
+        }
+      }
+
+      onProgress?.call(0.9, 'جاري حفظ الملف النصي...');
+      final outputDir = await getOutputDir();
+      final origBase = p.basenameWithoutExtension(inputPath);
+      final baseName = outputFileName?.trim().isNotEmpty == true
+          ? outputFileName!.trim()
+          : '${origBase}_text';
+      final outputPath = generateSafeFilePath(outputDir, baseName, '.txt');
+
+      final txtFile = File(outputPath);
+      await txtFile.writeAsString(buffer.toString());
+      await notifyMediaStore(outputPath);
+
+      stopwatch.stop();
+      return ToolTaskResult(
+        isSuccess: true,
+        outputFiles: [txtFile],
+        outputDirectory: outputDir.path,
+        duration: stopwatch.elapsed,
+        message: 'تم استخراج نصوص $total صفحة بنجاح إلى ملف نصي',
+      );
+    } catch (e) {
+      stopwatch.stop();
+      return ToolTaskResult(
+        isSuccess: false,
+        errorMessage: e.toString().replaceAll('Exception: ', ''),
+        duration: stopwatch.elapsed,
+      );
+    } finally {
+      await rxDoc?.dispose();
+    }
+  }
+}
+
+class _EncodeImageParams {
+  final img.Image image;
+  final bool isPng;
+  final int jpgQuality;
+
+  _EncodeImageParams({
+    required this.image,
+    required this.isPng,
+    required this.jpgQuality,
+  });
+}
+
+Uint8List _encodeImageTask(_EncodeImageParams params) {
+  if (params.isPng) {
+    return Uint8List.fromList(img.encodePng(params.image));
+  } else {
+    return Uint8List.fromList(img.encodeJpg(params.image, quality: params.jpgQuality));
+  }
+}
+
+class _PngToJpgParams {
+  final Uint8List pngBytes;
+  final int jpgQuality;
+
+  _PngToJpgParams({required this.pngBytes, required this.jpgQuality});
+}
+
+Uint8List _convertPngToJpgTask(_PngToJpgParams params) {
+  final decodedImg = img.decodePng(params.pngBytes);
+  if (decodedImg != null) {
+    return Uint8List.fromList(img.encodeJpg(decodedImg, quality: params.jpgQuality));
+  }
+  return params.pngBytes;
 }

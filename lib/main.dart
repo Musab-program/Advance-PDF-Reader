@@ -12,6 +12,7 @@ import 'package:pdf_reader/core/services/external_pdf_handler.dart';
 import 'package:pdf_reader/core/services/storage_service.dart';
 import 'package:pdf_reader/core/services/theme_controller.dart';
 import 'package:pdf_reader/routes/app_pages.dart';
+import 'package:pdf_reader/routes/app_routes.dart';
 
 const _pdfChannel = MethodChannel('com.example.pdf_reader/content_resolver');
 
@@ -26,6 +27,23 @@ void main() async {
 
   Get.put<StorageService>(StorageService(), permanent: true);
   Get.put<ThemeController>(ThemeController(), permanent: true);
+
+  // Register live listeners BEFORE querying initial paths so background stream copies are never missed
+  _pdfChannel.setMethodCallHandler((call) async {
+    if (call.method == 'onOpenPdf') {
+      ExternalPdfHandler.isResolvingExternalFile = false;
+      final String? newPath = call.arguments as String?;
+      if (newPath != null && newPath.isNotEmpty) {
+        ExternalPdfHandler.openPdf(newPath);
+      }
+    } else if (call.method == 'onOpenPdfFailed') {
+      ExternalPdfHandler.isResolvingExternalFile = false;
+      if (Get.currentRoute == Routes.SPLASH) {
+        Get.offAllNamed(Routes.HOME);
+      }
+    }
+  });
+  ExternalOfficeHandler.registerLiveOfficeIntentListener();
 
   // Check if opened from an external app (WhatsApp, Telegram, File Manager)
   try {
@@ -50,24 +68,6 @@ class PdfReaderApp extends StatefulWidget {
 }
 
 class _PdfReaderAppState extends State<PdfReaderApp> {
-  @override
-  void initState() {
-    super.initState();
-
-    // Listen for new incoming files when app is already running (onNewIntent)
-    _pdfChannel.setMethodCallHandler((call) async {
-      if (call.method == 'onOpenPdf') {
-        final String? newPath = call.arguments as String?;
-        if (newPath != null && newPath.isNotEmpty) {
-          ExternalPdfHandler.openPdf(newPath);
-        }
-      }
-    });
-
-    // Listen for new incoming Office files on its dedicated channel
-    ExternalOfficeHandler.registerLiveOfficeIntentListener();
-  }
-
   @override
   Widget build(BuildContext context) {
     final storageService = Get.find<StorageService>();

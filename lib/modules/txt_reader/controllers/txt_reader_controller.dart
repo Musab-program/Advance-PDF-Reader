@@ -1,8 +1,8 @@
 // lib/modules/txt_reader/controllers/txt_reader_controller.dart
-import 'dart:convert';
 import 'dart:io';
 import 'package:get/get.dart';
 import 'package:pdf_reader/core/services/storage_service.dart';
+import 'package:pdf_reader/core/utils/pdf_text_layout.dart';
 
 class TxtReaderController extends GetxController {
   final StorageService _storageService = Get.find<StorageService>();
@@ -21,7 +21,9 @@ class TxtReaderController extends GetxController {
       filePath.value = args['filePath'] ?? '';
       fileName.value = args['fileName'] ?? 'Text Document';
       if (args.containsKey('rawText') && args['rawText'] != null) {
-        textContent.value = args['rawText'];
+        textContent.value = PdfTextLayout.normalizeArabicText(args['rawText'].toString())
+            .replaceAll('\r\n', '\n')
+            .replaceAll('\r', '\n');
         isLoading.value = false;
         _storageService.addRecentFile(filePath.value, fileName.value);
         _storageService.savePageCount(filePath.value, 1);
@@ -38,23 +40,17 @@ class TxtReaderController extends GetxController {
       final file = File(filePath.value);
       if (await file.exists()) {
         final bytes = await file.readAsBytes();
-        
-        // Try UTF-8 first, fallback to Latin-1 if there are decoding errors
-        try {
-          textContent.value = utf8.decode(bytes);
-        } catch (_) {
-          textContent.value = latin1.decode(bytes);
-        }
+        textContent.value = PdfTextLayout.decodeTextBytes(bytes);
 
         // Add this file to recents list
         _storageService.addRecentFile(filePath.value, fileName.value);
         _storageService.savePageCount(filePath.value, 1); // 1 page for txt files
         _storageService.saveProgress(filePath.value, 1.0); // Marked as read
       } else {
-        textContent.value = 'File not found.';
+        textContent.value = 'txt_file_not_found'.tr;
       }
     } catch (e) {
-      textContent.value = 'Error reading file: $e';
+      textContent.value = '${'txt_read_error'.tr}: $e';
     } finally {
       isLoading.value = false;
     }

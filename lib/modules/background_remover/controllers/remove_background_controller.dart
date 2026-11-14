@@ -1,64 +1,122 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:get/get.dart';
-import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
-import '../services/image_matting_engine.dart';
+import '../../../core/services/storage_service.dart';
+import '../../../core/utils/app_toast.dart';
+import '../services/hugging_face_bg_remover_service.dart';
+import '../widgets/preview_background_selector.dart';
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
 
-enum TouchTool { none, wand, eraser, restore }
+class RemoveBackgroundController extends GetxController with WidgetsBindingObserver {
+  final StorageService _storageService = Get.find<StorageService>();
 
-class RemoveBackgroundController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxBool isProcessing = false.obs;
+  final RxBool isOffline = false.obs;
   final RxString selectedImagePath = ''.obs;
-
-  img.Image? _rawOriginal;
-  img.Image? _rawProcessed;
 
   final Rx<Uint8List?> originalBytes = Rx<Uint8List?>(null);
   final Rx<Uint8List?> processedBytes = Rx<Uint8List?>(null);
 
-  final RxDouble tolerance = 35.0.obs;
-  final Rx<TouchTool> currentTool = TouchTool.none.obs;
-  final RxDouble brushRadius = 25.0.obs;
   final RxBool showOriginal = false.obs;
+  final Rx<PreviewBgMode> previewBgMode = PreviewBgMode.checkerboard.obs;
   final RxString statusMessage = ''.obs;
   final RxString errorMessage = ''.obs;
   final RxDouble processingProgress = 0.0.obs;
 
+  static const MethodChannel _platformChannel =
+      MethodChannel('com.example.pdf_reader/content_resolver');
+
+  int _runId = 0;
   bool _isCancelled = false;
+  bool _isAppPaused = false;
+  bool _needsRestartOnResume = false;
+  Timer? _watchdogTimer;
 
   @override
   void onInit() {
     super.onInit();
-    debounce(tolerance, (_) {
-      if (_rawOriginal != null && !isProcessing.value) {
-        applyMatting();
+    WidgetsBinding.instance.addObserver(this);
+    checkConnectivity(showSnackbarIfOffline: false);
+  }
+
+  @override
+  void onClose() {
+    _watchdogTimer?.cancel();
+    HuggingFaceBgRemoverService.abortActiveRequest();
+    _setNativeKeepAlive(false);
+    WidgetsBinding.instance.removeObserver(this);
+    super.onClose();
+  }
+
+  Future<void> _setNativeKeepAlive(bool enable) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _platformChannel.invokeMethod('setProcessingKeepAlive', {'enable': enable});
+    } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _isAppPaused = true;
+    } else if (state == AppLifecycleState.resumed) {
+      _isAppPaused = false;
+      if (_needsRestartOnResume &&
+          !_isCancelled &&
+          originalBytes.value != null &&
+          processedBytes.value == null) {
+        _needsRestartOnResume = false;
+        applyAiMatting();
+      } else if (_needsRestartOnResume) {
+        _needsRestartOnResume = false;
+        isProcessing.value = false;
+        isLoading.value = false;
+      } else if (isOffline.value) {
+        checkConnectivity(showSnackbarIfOffline: false);
       }
-    }, time: const Duration(milliseconds: 300));
+    }
+  }
+
+  Future<bool> checkConnectivity({bool showSnackbarIfOffline = false}) async {
+    final connected = await HuggingFaceBgRemoverService.hasInternetConnection();
+    isOffline.value = !connected;
+    if (!connected && showSnackbarIfOffline) {
+      AppToast.showWarning('يرجى الاتصال بالإنترنت للمتابعة');
+    }
+    return connected;
   }
 
   void cancelOperation() {
+    _runId++;
     _isCancelled = true;
+    _needsRestartOnResume = false;
+    _watchdogTimer?.cancel();
+    _watchdogTimer = null;
+    HuggingFaceBgRemoverService.abortActiveRequest();
+    _setNativeKeepAlive(false);
     isProcessing.value = false;
     isLoading.value = false;
     statusMessage.value = 'cancel'.tr;
   }
 
   Future<void> pickImage() async {
+    final connected = await checkConnectivity(showSnackbarIfOffline: false);
+    if (!connected) return;
+
     try {
       _isCancelled = false;
+      _needsRestartOnResume = false;
       errorMessage.value = '';
-      isLoading.value = true;
       statusMessage.value = 'opening_gallery'.tr;
 
-      // Pick image using withData: true to directly read bytes from stream (works in offline/airplane mode)
       final result = await FilePicker.platform.pickFiles(
         type: FileType.image,
         allowMultiple: false,
@@ -68,14 +126,12 @@ class RemoveBackgroundController extends GetxController {
       if (_isCancelled) return;
 
       if (result == null || result.files.isEmpty) {
-        isLoading.value = false;
         return;
       }
 
       final pickedFile = result.files.single;
       Uint8List? bytes = pickedFile.bytes;
 
-      // Fallback: If bytes were not directly loaded by the picker, read from path
       if (bytes == null && pickedFile.path != null && pickedFile.path!.isNotEmpty) {
         final f = File(pickedFile.path!);
         if (await f.exists()) {
@@ -85,168 +141,210 @@ class RemoveBackgroundController extends GetxController {
 
       if (bytes == null || bytes.isEmpty) {
         errorMessage.value = 'failed_to_load_image'.tr;
-        isLoading.value = false;
         return;
       }
 
       selectedImagePath.value = pickedFile.path ?? pickedFile.name;
       originalBytes.value = bytes;
+      processedBytes.value = null;
+      showOriginal.value = false;
 
-      statusMessage.value = 'processing_image'.tr;
-      processingProgress.value = 0.2;
-
-      // Decode and optimize resolution in isolate
-      final decoded = await compute(_decodeAndOptimizeIsolate, bytes);
-      if (_isCancelled) return;
-
-      if (decoded != null) {
-        _rawOriginal = decoded;
-        processingProgress.value = 0.5;
-        await applyMatting();
-      } else {
-        errorMessage.value = 'failed_to_load_image'.tr;
-      }
+      // Start processing immediately with scanner animation
+      await applyAiMatting();
     } catch (e) {
-      errorMessage.value = e.toString();
-    } finally {
-      isLoading.value = false;
+      errorMessage.value = e.toString().replaceAll('Exception: ', '');
     }
   }
 
-  Future<void> applyMatting() async {
-    if (_rawOriginal == null) return;
-    try {
-      _isCancelled = false;
-      isProcessing.value = true;
-      errorMessage.value = '';
-      processingProgress.value = 0.6;
-      statusMessage.value = 'processing_image'.tr;
-
-      final tol = tolerance.value;
-      final orig = _rawOriginal!;
-
-      final result = await compute(_runMattingIsolate, {
-        'image': orig,
-        'tolerance': tol,
-      });
-
-      if (_isCancelled) return;
-
-      _rawProcessed = result.resultImage;
-      processingProgress.value = 0.85;
-
-      final encodedBytes = await compute(_encodePngIsolate, _rawProcessed!);
-      if (_isCancelled) return;
-
-      processedBytes.value = encodedBytes;
-      processingProgress.value = 1.0;
-      statusMessage.value = '${(result.transparencyRatio * 100).toInt()}% background cleared';
-    } catch (e) {
-      errorMessage.value = e.toString();
-    } finally {
+  Future<void> applyAiMatting() async {
+    if (originalBytes.value == null) {
       isProcessing.value = false;
-    }
-  }
-
-  void handleCanvasTap(double relX, double relY) {
-    if (_rawProcessed == null || _rawOriginal == null) return;
-    final w = _rawProcessed!.width;
-    final h = _rawProcessed!.height;
-    final px = (relX * w).round().clamp(0, w - 1);
-    final py = (relY * h).round().clamp(0, h - 1);
-
-    switch (currentTool.value) {
-      case TouchTool.wand:
-        ImageMattingEngine.applyMagicWandTap(
-          targetImage: _rawProcessed!,
-          originalImage: _rawOriginal!,
-          tapX: px,
-          tapY: py,
-          tolerance: tolerance.value,
-        );
-        _refreshProcessedBytes();
-        break;
-      case TouchTool.eraser:
-        ImageMattingEngine.applyBrush(
-          targetImage: _rawProcessed!,
-          originalImage: _rawOriginal!,
-          centerX: px,
-          centerY: py,
-          radius: brushRadius.value.round(),
-          isErase: true,
-        );
-        _refreshProcessedBytes();
-        break;
-      case TouchTool.restore:
-        ImageMattingEngine.applyBrush(
-          targetImage: _rawProcessed!,
-          originalImage: _rawOriginal!,
-          centerX: px,
-          centerY: py,
-          radius: brushRadius.value.round(),
-          isErase: false,
-        );
-        _refreshProcessedBytes();
-        break;
-      case TouchTool.none:
-        break;
-    }
-  }
-
-  void handleCanvasPan(double relX, double relY) {
-    if (currentTool.value == TouchTool.none || currentTool.value == TouchTool.wand) {
+      isLoading.value = false;
       return;
     }
-    handleCanvasTap(relX, relY);
-  }
 
-  Future<void> _refreshProcessedBytes() async {
-    if (_rawProcessed == null) return;
-    final encoded = await compute(_encodePngIsolate, _rawProcessed!);
-    processedBytes.value = encoded;
+    _needsRestartOnResume = false;
+    final connected = await checkConnectivity(showSnackbarIfOffline: false);
+    if (!connected) {
+      isProcessing.value = false;
+      isLoading.value = false;
+      return;
+    }
+
+    final int myRunId = ++_runId;
+    _isCancelled = false;
+    isLoading.value = true;
+    isProcessing.value = true;
+    errorMessage.value = '';
+    processingProgress.value = 0.15;
+    statusMessage.value = 'جاري المعالجة...';
+
+    _watchdogTimer?.cancel();
+    await _setNativeKeepAlive(true);
+    _watchdogTimer = Timer(const Duration(seconds: 38), () {
+      if (myRunId == _runId && isLoading.value) {
+        _runId++;
+        _needsRestartOnResume = false;
+        HuggingFaceBgRemoverService.abortActiveRequest();
+        _setNativeKeepAlive(false);
+        isProcessing.value = false;
+        isLoading.value = false;
+        errorMessage.value = 'استغرقت المعالجة وقتاً طويلاً، يرجى المحاولة مرة أخرى';
+        AppToast.showError(errorMessage.value);
+      }
+    });
+
+    try {
+      final token = _storageService.getHuggingFaceToken();
+      final pngBytes = await HuggingFaceBgRemoverService.removeBackground(
+        originalBytes.value!,
+        token: token,
+        onProgress: (progress, status) {
+          if (!_isCancelled && myRunId == _runId) {
+            processingProgress.value = progress;
+            statusMessage.value = status;
+          }
+        },
+      );
+
+      if (_isCancelled || myRunId != _runId) return;
+
+      processedBytes.value = pngBytes;
+      showOriginal.value = false;
+      processingProgress.value = 1.0;
+      statusMessage.value = 'تم بنجاح';
+    } on OperationCancelledException {
+      return;
+    } on NoInternetException catch (e) {
+      if (myRunId != _runId) return;
+      isOffline.value = true;
+      errorMessage.value = e.message;
+    } catch (e) {
+      if (_isCancelled || myRunId != _runId) return;
+      if (_isAppPaused) {
+        // OS throttled/dropped the connection while in background: pause timer & keep-alive
+        // and cleanly restart the job the instant the user returns to foreground.
+        _watchdogTimer?.cancel();
+        _watchdogTimer = null;
+        _setNativeKeepAlive(false);
+        _needsRestartOnResume = true;
+        return;
+      }
+      errorMessage.value = e.toString().replaceAll('Exception: ', '');
+      AppToast.showError(errorMessage.value);
+    } finally {
+      if (myRunId == _runId && !_needsRestartOnResume) {
+        _watchdogTimer?.cancel();
+        _watchdogTimer = null;
+        _setNativeKeepAlive(false);
+        isProcessing.value = false;
+        isLoading.value = false;
+      }
+    }
   }
 
   Future<void> savePng() async {
-    if (processedBytes.value == null) return;
+    final bytes = processedBytes.value;
+    if (bytes == null || bytes.isEmpty) return;
+
     try {
-      isLoading.value = true;
-      Directory? dir;
+      Directory? targetDir;
+
       if (Platform.isAndroid) {
-        dir = Directory('/storage/emulated/0/Download');
-        if (!dir.existsSync()) {
-          dir = await getExternalStorageDirectory();
+        final picturesDir = Directory('/storage/emulated/0/Pictures/PdfReader');
+        try {
+          if (!picturesDir.existsSync()) {
+            picturesDir.createSync(recursive: true);
+          }
+          targetDir = picturesDir;
+        } catch (_) {
+          final fallbackPictures = Directory('/storage/emulated/0/Pictures');
+          if (fallbackPictures.existsSync()) {
+            targetDir = fallbackPictures;
+          }
         }
-      } else {
-        dir = await getApplicationDocumentsDirectory();
       }
 
-      dir ??= await getTemporaryDirectory();
+      targetDir ??= await getExternalStorageDirectory();
+      targetDir ??= await getApplicationDocumentsDirectory();
 
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
       final origBase = selectedImagePath.value.isNotEmpty
           ? p.basenameWithoutExtension(selectedImagePath.value)
-          : 'image';
-      final fileName = '${origBase}_nobg_$timestamp.png';
-      final savePath = p.join(dir.path, fileName);
+          : 'cutout';
+      final suggestedName = '${origBase}_nobg';
+      String? chosenBaseName = suggestedName;
+
+      final ctx = Get.context;
+      if (ctx != null && ctx.mounted) {
+        final nameCtrl = TextEditingController(text: suggestedName);
+        String? errorText;
+        chosenBaseName = await LuxuryDialog.showCustom<String>(
+          ctx,
+          builder: (dCtx) => StatefulBuilder(
+            builder: (dCtx, setDialogState) => LuxuryDialog(
+              compact: true,
+              icon: Icons.save_alt_rounded,
+              title: 'اسم الصورة المحفوظة',
+              body: TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                onChanged: (_) {
+                  if (errorText != null) setDialogState(() => errorText = null);
+                },
+                decoration: InputDecoration(
+                  labelText: 'file_name'.tr,
+                  suffixText: '.png',
+                  errorText: errorText,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              secondaryButtonText: 'إلغاء',
+              onSecondaryPressed: () {},
+              primaryButtonText: 'حفظ',
+              primaryButtonIcon: Icons.check_rounded,
+              closeOnPrimary: false,
+              onPrimaryPressed: () {
+                final v = nameCtrl.text.trim();
+                if (v.isEmpty) {
+                  setDialogState(() => errorText = 'يرجى إدخال اسم الصورة أولاً');
+                  return;
+                }
+                Navigator.of(dCtx).pop(v);
+              },
+            ),
+          ),
+        );
+        if (chosenBaseName == null || chosenBaseName.trim().isEmpty) {
+          return;
+        }
+      }
+
+      final sanitized = chosenBaseName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+      var savePath = p.join(targetDir.path, '$sanitized.png');
+      int counter = 1;
+      while (File(savePath).existsSync()) {
+        savePath = p.join(targetDir.path, '${sanitized}_$counter.png');
+        counter++;
+      }
 
       final file = File(savePath);
-      await file.writeAsBytes(processedBytes.value!);
+      await file.writeAsBytes(bytes, flush: true);
 
-      Get.snackbar(
-        'success'.tr,
-        'File saved: $fileName',
-        mainButton: TextButton(
-          onPressed: () {
-            OpenFilex.open(savePath);
-          },
-          child: Text('open'.tr, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        ),
-        duration: const Duration(seconds: 4),
-      );
+      // Instantly notify Android MediaStore so it appears in Gallery immediately
+      if (Platform.isAndroid) {
+        try {
+          const platform = MethodChannel('com.example.pdf_reader/content_resolver');
+          await platform.invokeMethod('scanMediaFile', {'filePath': savePath});
+        } catch (e) {
+          debugPrint('MediaScanner scan error: $e');
+        }
+      }
+
+      // Elegant top-centered compact toast
+      AppToast.showSuccess('تم الحفظ في المعرض');
     } catch (e) {
-      Get.snackbar('error'.tr, 'Failed to save: $e');
-    } finally {
-      isLoading.value = false;
+      AppToast.showError('فشل حفظ الصورة: $e');
     }
   }
 
@@ -256,41 +354,15 @@ class RemoveBackgroundController extends GetxController {
       final tempDir = await getTemporaryDirectory();
       final tempFile = File('${tempDir.path}/cutout_${DateTime.now().millisecondsSinceEpoch}.png');
       await tempFile.writeAsBytes(processedBytes.value!);
-      await Share.shareXFiles([XFile(tempFile.path)], text: 'Image with background removed');
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(tempFile.path)],
+          text: 'Image with background removed',
+          sharePositionOrigin: const Rect.fromLTWH(0, 0, 100, 100),
+        ),
+      );
     } catch (e) {
-      Get.snackbar('error'.tr, 'Failed to share: $e');
+      AppToast.showError('فشلت المشاركة: $e');
     }
   }
-}
-
-// ── Isolates ──
-img.Image? _decodeAndOptimizeIsolate(Uint8List bytes) {
-  final decoded = img.decodeImage(bytes);
-  if (decoded == null) return null;
-
-  // Max dimension 1400px: preserves 100% fine lines for logos, but ensures fast 100-200ms processing
-  const maxDim = 1400;
-  if (decoded.width > maxDim || decoded.height > maxDim) {
-    final double scale = maxDim / max(decoded.width, decoded.height);
-    return img.copyResize(
-      decoded,
-      width: (decoded.width * scale).round(),
-      height: (decoded.height * scale).round(),
-      interpolation: img.Interpolation.linear,
-    );
-  }
-  return decoded;
-}
-
-MattingResult _runMattingIsolate(Map<String, dynamic> params) {
-  final img.Image image = params['image'];
-  final double tol = params['tolerance'];
-  return ImageMattingEngine.removeBackground(
-    original: image,
-    tolerance: tol,
-  );
-}
-
-Uint8List _encodePngIsolate(img.Image image) {
-  return Uint8List.fromList(img.encodePng(image));
 }

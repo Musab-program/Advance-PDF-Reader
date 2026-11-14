@@ -15,12 +15,14 @@ class _OfficeParseTask {
   final String fileType;
   final String fileName;
   final bool isDark;
+  final double screenWidth;
 
   const _OfficeParseTask({
     required this.bytes,
     required this.fileType,
     required this.fileName,
     required this.isDark,
+    required this.screenWidth,
   });
 }
 
@@ -28,11 +30,19 @@ class _OfficeParseOutput {
   final String? htmlContent;
   final XlsxWorkbook? workbook;
   final PptxPresentation? presentation;
+  final int pageCount;
+  final double pageWidthPx;
+  final double pageMinHeightPx;
+  final double fitScale;
 
   const _OfficeParseOutput({
     this.htmlContent,
     this.workbook,
     this.presentation,
+    this.pageCount = 1,
+    this.pageWidthPx = 794.0,
+    this.pageMinHeightPx = 1123.0,
+    this.fitScale = 1.0,
   });
 }
 
@@ -40,8 +50,18 @@ class _OfficeParseOutput {
 _OfficeParseOutput _parseOfficeInIsolate(_OfficeParseTask task) {
   final type = task.fileType;
   if (type == 'DOCX') {
-    final html = DocxParser.parseToHtml(task.bytes, isDark: task.isDark);
-    return _OfficeParseOutput(htmlContent: html);
+    final result = DocxParser.parse(
+      task.bytes,
+      isDark: task.isDark,
+      screenWidth: task.screenWidth,
+    );
+    return _OfficeParseOutput(
+      htmlContent: result.html,
+      pageCount: result.pageCount,
+      pageWidthPx: result.pageWidthPx,
+      pageMinHeightPx: result.pageMinHeightPx,
+      fitScale: result.fitScale,
+    );
   } else if (type == 'XLSX') {
     final wb = XlsxParser.parse(task.bytes);
     return _OfficeParseOutput(workbook: wb);
@@ -80,6 +100,7 @@ class OfficeViewerController extends GetxController {
 
   // Zoom & Dual Layout Controls
   final RxDouble zoomScale = 1.0.obs;
+  final RxDouble initialFitZoom = 0.48.obs;
   final RxBool isDocxReflowMode = false.obs; // false = WPS Page Mode (A4 Twips), true = Mobile Reflow Mode
   final TransformationController xlsxTransformController = TransformationController();
   final TransformationController pptxTransformController = TransformationController();
@@ -223,17 +244,28 @@ class OfficeViewerController extends GetxController {
   }
 
   void zoomIn() {
-    final next = (zoomScale.value + 0.25).clamp(0.25, 4.0);
+    final step = (zoomScale.value < 0.8) ? 0.15 : 0.25;
+    final next = (zoomScale.value + step).clamp(0.25, 4.0);
     _applyZoom(next);
   }
 
   void zoomOut() {
-    final next = (zoomScale.value - 0.25).clamp(0.25, 4.0);
+    final step = (zoomScale.value <= 0.8) ? 0.15 : 0.25;
+    final next = (zoomScale.value - step).clamp(0.25, 4.0);
     _applyZoom(next);
   }
 
   void resetZoom() {
-    _applyZoom(1.0);
+    if (isWordFamily) {
+      // Toggle between WPS Fit-to-Width and 100%
+      if ((zoomScale.value - initialFitZoom.value).abs() < 0.04) {
+        _applyZoom(1.0);
+      } else {
+        _applyZoom(initialFitZoom.value);
+      }
+    } else {
+      _applyZoom(1.0);
+    }
   }
 
   void _applyZoom(double targetScale) {
@@ -250,6 +282,11 @@ class OfficeViewerController extends GetxController {
   void toggleDocxLayoutMode() {
     isDocxReflowMode.value = !isDocxReflowMode.value;
     docxWebViewController?.runJavaScript('setReflowMode(${isDocxReflowMode.value});');
+    if (isDocxReflowMode.value) {
+      _applyZoom(1.0);
+    } else {
+      _applyZoom(initialFitZoom.value);
+    }
   }
 
   void toggleFreezeFirstRow() {
@@ -293,8 +330,9 @@ class OfficeViewerController extends GetxController {
 
       final bytes = await file.readAsBytes();
       final isDark = Get.isDarkMode;
+      final screenWidth = Get.width > 100 ? Get.width : 390.0;
 
-      // Offload heavy XML/Archive parsing to a background isolate (like WPS Sandbox Worker)
+      // Offload heavy XML/Archive parsing to background isolate (like WPS Sandbox Worker)
       final parsed = await compute(
         _parseOfficeInIsolate,
         _OfficeParseTask(
@@ -302,10 +340,19 @@ class OfficeViewerController extends GetxController {
           fileType: fileType.value,
           fileName: fileName.value,
           isDark: isDark,
+          screenWidth: screenWidth,
         ),
       );
 
       if (parsed.htmlContent != null) {
+        if (fileType.value == 'DOCX') {
+          zoomScale.value = parsed.fitScale;
+          initialFitZoom.value = parsed.fitScale;
+        } else {
+          zoomScale.value = 1.0;
+          initialFitZoom.value = 1.0;
+        }
+
         final controller = WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
           ..enableZoom(true)
@@ -322,9 +369,11 @@ class OfficeViewerController extends GetxController {
       }
 
       _storageService.addRecentFile(filePath.value, fileName.value);
-      final count = parsed.presentation?.slides.length ??
-          parsed.workbook?.sheets.length ??
-          1;
+      final count = parsed.pageCount > 1
+          ? parsed.pageCount
+          : (parsed.presentation?.slides.length ??
+              parsed.workbook?.sheets.length ??
+              1);
       _storageService.savePageCount(filePath.value, count);
       _storageService.saveProgress(filePath.value, 1.0);
     } catch (e) {

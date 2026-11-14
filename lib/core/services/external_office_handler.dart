@@ -13,12 +13,18 @@ class ExternalOfficeHandler {
       MethodChannel('com.example.pdf_reader/office_intent');
 
   static String? _pendingOfficePath;
+  static bool isResolvingExternalOffice = false;
 
   static bool get hasPendingOfficeFile =>
       _pendingOfficePath != null && _pendingOfficePath!.isNotEmpty;
 
   static void setPendingOfficeFile(String? path) {
+    if (path == '__RESOLVING__') {
+      isResolvingExternalOffice = true;
+      return;
+    }
     if (path != null && path.isNotEmpty) {
+      isResolvingExternalOffice = false;
       _pendingOfficePath = path;
     }
   }
@@ -46,9 +52,15 @@ class ExternalOfficeHandler {
   static void registerLiveOfficeIntentListener() {
     _officeChannel.setMethodCallHandler((call) async {
       if (call.method == 'onOpenOfficeFile') {
+        isResolvingExternalOffice = false;
         final String? newPath = call.arguments as String?;
         if (newPath != null && newPath.isNotEmpty) {
           openOfficeDocument(newPath);
+        }
+      } else if (call.method == 'onOpenOfficeFailed') {
+        isResolvingExternalOffice = false;
+        if (Get.currentRoute == Routes.SPLASH) {
+          Get.offAllNamed(Routes.HOME);
         }
       }
     });
@@ -107,22 +119,39 @@ class ExternalOfficeHandler {
 
   /// Opens [filePath] in the dedicated Office Viewer module.
   static void openOfficeDocument(String filePath) {
+    isResolvingExternalOffice = false;
     if (filePath.isEmpty) return;
+
+    if (Get.key.currentState == null) {
+      setPendingOfficeFile(filePath);
+      return;
+    }
 
     _pendingOfficePath = null;
     final ext = p.extension(filePath).toUpperCase().replaceAll('.', '');
     final fileName = p.basenameWithoutExtension(filePath);
     final officeType = resolveOfficeFormatType(ext);
+    final resolvedName = fileName.isNotEmpty ? fileName : p.basename(filePath);
 
-    // If OfficeViewerController is already active on screen, switch the file immediately
-    if (Get.isRegistered<OfficeViewerController>() &&
-        Get.currentRoute == Routes.OFFICE_VIEWER) {
+    // If OfficeViewerController is already registered, update it and bring it to front
+    if (Get.isRegistered<OfficeViewerController>()) {
       final ctrl = Get.find<OfficeViewerController>();
       ctrl.loadExternalOfficeFile(
         newPath: filePath,
-        newName: fileName.isNotEmpty ? fileName : p.basename(filePath),
+        newName: resolvedName,
         newType: officeType,
       );
+      if (Get.currentRoute != Routes.OFFICE_VIEWER) {
+        Get.until(
+            (route) => Get.currentRoute == Routes.OFFICE_VIEWER || route.isFirst);
+        if (Get.currentRoute != Routes.OFFICE_VIEWER) {
+          Get.toNamed(Routes.OFFICE_VIEWER, arguments: {
+            'filePath': filePath,
+            'fileName': resolvedName,
+            'fileType': officeType,
+          });
+        }
+      }
       return;
     }
 
@@ -132,7 +161,7 @@ class ExternalOfficeHandler {
 
     Get.toNamed(Routes.OFFICE_VIEWER, arguments: {
       'filePath': filePath,
-      'fileName': fileName.isNotEmpty ? fileName : p.basename(filePath),
+      'fileName': resolvedName,
       'fileType': officeType,
     });
   }

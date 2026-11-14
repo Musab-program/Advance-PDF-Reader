@@ -10,6 +10,7 @@ class SearchController extends GetxController {
   late final HomeController _homeController;
 
   final TextEditingController textController = TextEditingController();
+  final FocusNode searchFocusNode = FocusNode();
   final RxString query = ''.obs;
   final RxString sortOrder = 'date'.obs; // 'date', 'type', 'size'
   
@@ -49,6 +50,7 @@ class SearchController extends GetxController {
   @override
   void onClose() {
     textController.dispose();
+    searchFocusNode.dispose();
     super.onClose();
   }
 

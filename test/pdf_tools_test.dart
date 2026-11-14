@@ -156,5 +156,132 @@ void main() {
       expect(check.pages.count, 2);
       check.dispose();
     });
+
+    test('5. Page dimensions and rotation preservation in section', () async {
+      final doc = PdfDocument();
+      doc.pageSettings.margins.all = 0;
+      final sec1 = doc.sections!.add();
+      sec1.pageSettings.margins.all = 0;
+      sec1.pageSettings.size = const Size(800, 600); // Landscape
+      sec1.pageSettings.orientation = PdfPageOrientation.landscape;
+      final p1 = sec1.pages.add();
+      p1.graphics.drawString('Landscape Page', PdfStandardFont(PdfFontFamily.helvetica, 16));
+
+      final sec2 = doc.sections!.add();
+      sec2.pageSettings.margins.all = 0;
+      sec2.pageSettings.size = const Size(400, 600); // Portrait
+      sec2.pageSettings.orientation = PdfPageOrientation.portrait;
+      final p2 = sec2.pages.add();
+      p2.graphics.drawString('Portrait Page', PdfStandardFont(PdfFontFamily.helvetica, 16));
+
+      final bytes = await doc.save();
+      doc.dispose();
+
+      // Read back
+      final readDoc = PdfDocument(inputBytes: bytes);
+      expect(readDoc.pages.count, 2);
+      expect(readDoc.pages[0].size.width, 800);
+      expect(readDoc.pages[0].size.height, 600);
+      expect(readDoc.pages[1].size.width, 400);
+      expect(readDoc.pages[1].size.height, 600);
+
+      // Copying to targetDoc preserving section and zero margins
+      final targetDoc = PdfDocument();
+      targetDoc.pageSettings.margins.all = 0;
+      for (int i = 0; i < readDoc.pages.count; i++) {
+        final srcPage = readDoc.pages[i];
+        final section = targetDoc.sections!.add();
+        section.pageSettings.margins.all = 0;
+        section.pageSettings.size = srcPage.size;
+        section.pageSettings.orientation = srcPage.size.width > srcPage.size.height
+            ? PdfPageOrientation.landscape
+            : PdfPageOrientation.portrait;
+        final newPage = section.pages.add();
+        newPage.graphics.drawPdfTemplate(srcPage.createTemplate(), Offset.zero, srcPage.size);
+      }
+      final targetBytes = await targetDoc.save();
+      targetDoc.dispose();
+      readDoc.dispose();
+
+      final verifyTarget = PdfDocument(inputBytes: targetBytes);
+      expect(verifyTarget.pages.count, 2);
+      expect(verifyTarget.pages[0].size.width, 800);
+      expect(verifyTarget.pages[0].size.height, 600);
+      expect(verifyTarget.pages[1].size.width, 400);
+      expect(verifyTarget.pages[1].size.height, 600);
+      verifyTarget.dispose();
+    });
+
+    test('6. Rotation preservation and combining turns', () async {
+      int getRotationTurns(PdfPageRotateAngle angle) {
+        switch (angle) {
+          case PdfPageRotateAngle.rotateAngle90:
+            return 1;
+          case PdfPageRotateAngle.rotateAngle180:
+            return 2;
+          case PdfPageRotateAngle.rotateAngle270:
+            return 3;
+          case PdfPageRotateAngle.rotateAngle0:
+          default:
+            return 0;
+        }
+      }
+
+      PdfPageRotateAngle getAngleFromTurns(int turns) {
+        switch (turns % 4) {
+          case 1:
+            return PdfPageRotateAngle.rotateAngle90;
+          case 2:
+            return PdfPageRotateAngle.rotateAngle180;
+          case 3:
+            return PdfPageRotateAngle.rotateAngle270;
+          case 0:
+          default:
+            return PdfPageRotateAngle.rotateAngle0;
+        }
+      }
+
+      final doc = PdfDocument();
+      doc.pageSettings.margins.all = 0;
+      final sec = doc.sections!.add();
+      sec.pageSettings.margins.all = 0;
+      sec.pageSettings.size = const Size(500, 700);
+      sec.pageSettings.rotate = PdfPageRotateAngle.rotateAngle90;
+      sec.pages.add();
+
+      final bytes = await doc.save();
+      doc.dispose();
+
+      final readDoc = PdfDocument(inputBytes: bytes);
+      final srcP = readDoc.pages[0];
+      expect(srcP.rotation, PdfPageRotateAngle.rotateAngle90);
+      final origTurns = getRotationTurns(srcP.rotation);
+      expect(origTurns, 1);
+
+      // User adds 1 turn (90 deg) in Organize: total should be 2 turns (180 deg)
+      final userTurns = 1;
+      final totalTurns = (origTurns + userTurns) % 4;
+      expect(totalTurns, 2);
+
+      final targetDoc = PdfDocument();
+      targetDoc.pageSettings.margins.all = 0;
+      final targetSec = targetDoc.sections!.add();
+      targetSec.pageSettings.margins.all = 0;
+      targetSec.pageSettings.size = srcP.size;
+      targetSec.pageSettings.orientation = srcP.size.width > srcP.size.height
+          ? PdfPageOrientation.landscape
+          : PdfPageOrientation.portrait;
+      targetSec.pageSettings.rotate = getAngleFromTurns(totalTurns);
+      final newPage = targetSec.pages.add();
+      newPage.graphics.drawPdfTemplate(srcP.createTemplate(), Offset.zero, srcP.size);
+
+      final targetBytes = await targetDoc.save();
+      targetDoc.dispose();
+      readDoc.dispose();
+
+      final verify = PdfDocument(inputBytes: targetBytes);
+      expect(verify.pages[0].rotation, PdfPageRotateAngle.rotateAngle180);
+      verify.dispose();
+    });
   });
 }

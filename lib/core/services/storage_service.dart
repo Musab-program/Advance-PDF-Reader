@@ -143,6 +143,18 @@ class StorageService {
     }
   }
 
+  // ── Hugging Face & AI Background Remover Persistence ──
+  static const String defaultHfToken = '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';
+  void saveHuggingFaceToken(String token) => _box.write('hf_token', token.trim());
+  String getHuggingFaceToken() => _box.read<String>('hf_token') ?? defaultHfToken;
+
+  void saveAiRemovalEnabled(bool enabled) => _box.write('ai_removal_enabled', enabled);
+  bool getAiRemovalEnabled() => _box.read<bool>('ai_removal_enabled') ?? true;
+
+  // ── Auto Scroll Speed Persistence ──
+  void saveAutoScrollSpeed(double speed) => _box.write('auto_scroll_speed', speed);
+  double getAutoScrollSpeed() => _box.read<double>('auto_scroll_speed') ?? 1.0;
+
   List<Map<String, dynamic>> getRecentFiles() {
     final raw = _box.read<String>('recent_files');
     if (raw == null) return [];

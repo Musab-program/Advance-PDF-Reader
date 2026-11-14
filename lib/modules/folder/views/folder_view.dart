@@ -5,6 +5,7 @@ import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/domain/entities/pdf_entity.dart';
 import 'package:pdf_reader/modules/folder/controllers/folder_controller.dart';
 import 'package:pdf_reader/modules/home/widgets/selection_details_sheet.dart';
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
 
 class FolderView extends GetView<FolderController> {
   const FolderView({super.key});
@@ -507,117 +508,17 @@ class FolderView extends GetView<FolderController> {
   }
 
   void _confirmBulkDelete(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.delete_sweep_rounded,
-                  color: Colors.redAccent,
-                  size: 36,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'remove_title'.tr,
-                style: TextStyle(
-                  color: textPrimaryColor,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'remove_desc'.tr,
-                style: TextStyle(
-                  color: textSecondaryColor,
-                  fontSize: 14,
-                  height: 1.4,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        side: BorderSide(
-                          color: Theme.of(context).dividerColor.withOpacity(0.3),
-                        ),
-                      ),
-                      onPressed: () => Get.back(),
-                      child: Text(
-                        'cancel'.tr,
-                        style: TextStyle(
-                          color: textSecondaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: () {
-                        controller.deleteSelected();
-                        Get.back();
-                      },
-                      child: Text(
-                        'remove_title'.tr,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+    LuxuryDialog.show(
+      context,
+      compact: true,
+      accentColor: Colors.redAccent,
+      icon: Icons.delete_sweep_rounded,
+      title: 'remove_title'.tr,
+      message: 'remove_desc'.tr,
+      secondaryButtonText: 'cancel'.tr,
+      primaryButtonText: 'remove_title'.tr,
+      primaryButtonIcon: Icons.delete_outline_rounded,
+      onPrimaryPressed: controller.deleteSelected,
     );
   }
 }

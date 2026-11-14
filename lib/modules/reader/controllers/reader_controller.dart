@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
@@ -11,10 +12,18 @@ import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:pdf_reader/core/services/external_pdf_handler.dart';
 import 'package:pdf_reader/core/services/storage_service.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/data/models/pdf_file_model.dart';
 import 'package:pdf_reader/domain/entities/pdf_entity.dart';
 import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/merge_pdf_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/split_pdf_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/views/pdf_to_image_view.dart';
+import 'package:pdf_reader/modules/pdf_tools/services/pdf_tools_service.dart';
+import 'package:pdf_reader/modules/pdf_tools/widgets/tool_result_sheet.dart';
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
+import 'package:pdf_reader/modules/reader/widgets/speed_picker_sheet.dart';
 
 enum ReadingTheme {
   white,
@@ -23,7 +32,7 @@ enum ReadingTheme {
   gray,
 }
 
-class ReaderController extends GetxController with GetSingleTickerProviderStateMixin {
+class ReaderController extends GetxController with GetTickerProviderStateMixin {
   final StorageService _storageService = Get.find<StorageService>();
 
   // pdfrx controller — made final to prevent detachment bugs when recreated
@@ -78,7 +87,26 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   double? _savedRelativeX;
   double? _savedRelativeY;
   double? _savedZoom;
+  double? _savedViewWidth;
   Timer? _savedPositionClearTimer;
+
+  // ── Auto-Scroll (Continuous Smooth Pixel Scroll) State ──
+  final RxBool isAutoScrolling = false.obs;
+  final RxBool isAutoScrollPaused = false.obs;
+  final RxDouble autoScrollSpeed = 1.0.obs;
+  final RxBool isAutoScrollHudMinimized = false.obs;
+  final RxBool isAutoScrollHudFaded = false.obs;
+  final Rx<Offset?> autoScrollBubblePosition = Rx<Offset?>(null);
+  Timer? _autoMinimizeTimer;
+  Timer? _bubbleFadeTimer;
+  Ticker? _autoScrollTicker;
+  Duration _lastAutoScrollElapsed = Duration.zero;
+  bool _isUserTouchingDuringAutoScroll = false;
+
+  static final List<double> autoScrollSpeedPresets = List.generate(
+    80,
+    (i) => double.parse(((i + 1) * 0.25).toStringAsFixed(2)),
+  );
 
   @override
   void onInit() {
@@ -90,6 +118,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     _updateStatusBar();
     _initSearcher();
     isMangaMode.value = _storageService.getMangaMode();
+    autoScrollSpeed.value = _storageService.getAutoScrollSpeed();
 
     final args = Get.arguments as Map<String, dynamic>?;
     final pendingFile = ExternalPdfHandler.consumePendingFile();
@@ -172,7 +201,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   Future<void> _loadFromFile(String filePath) async {
     try {
       final file = File(filePath);
-      if (await file.exists()) {
+      if (file.existsSync()) {
         final initialPdf = PdfFileModel.fromFile(
           file,
           progress: _storageService.getProgress(file.path),
@@ -196,14 +225,20 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
       return;
     }
 
-    // Only scan sibling PDFs if the file is not in the temporary cache directory
+    // Defer sibling PDF scanning until after the document finishes loading so disk I/O
+    // and main-thread sorting never compete with PDFium while opening the file.
     if (!filePath.contains('/cache/')) {
       unawaited(() async {
         try {
+          while (isDocumentLoading.value && !isClosed) {
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+          if (isClosed) return;
           final folderPath = p.dirname(filePath);
           final folderName = p.basename(folderPath);
           _storageService.setLastFolder(folderPath);
           final allFiles = await FileUtils.scanPdfFiles(folderPath);
+          if (isClosed) return;
           final files = allFiles
               .where((f) => p.extension(f.path).toLowerCase() == '.pdf')
               .toList();
@@ -219,7 +254,6 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
             if (idx >= 0) {
               pdfQueue.assignAll(mapped);
               currentIndex.value = idx;
-              update();
             }
           }
         } catch (_) {}
@@ -243,11 +277,12 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   void _updateStatusBar() {
     if (showOverlay.value) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness: readingTheme.value == ReadingTheme.dark ? Brightness.light : Brightness.dark,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
         systemNavigationBarColor: Colors.transparent,
-        systemNavigationBarIconBrightness: readingTheme.value == ReadingTheme.dark ? Brightness.light : Brightness.dark,
+        systemNavigationBarIconBrightness: Brightness.light,
       ));
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -288,6 +323,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
       _savedRelativeX = (centerPos.dx - pageRect.left) / pageRect.width;
       _savedRelativeY = (centerPos.dy - pageRect.top) / pageRect.height;
       _savedZoom = pdfViewerController.currentZoom;
+      _savedViewWidth = pdfViewerController.viewSize.width;
     } catch (_) {
       // Fallback to currentPage.value
       try {
@@ -299,6 +335,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
           _savedRelativeX = (centerPos.dx - pageRect.left) / pageRect.width;
           _savedRelativeY = (centerPos.dy - pageRect.top) / pageRect.height;
           _savedZoom = pdfViewerController.currentZoom;
+          _savedViewWidth = pdfViewerController.viewSize.width;
         }
       } catch (_) {
         _savedPageNumber = null;
@@ -313,6 +350,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     _savedRelativeX = null;
     _savedRelativeY = null;
     _savedZoom = null;
+    _savedViewWidth = null;
     _savedPositionClearTimer?.cancel();
     _savedPositionClearTimer = null;
   }
@@ -325,7 +363,10 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
       final savedPage = _savedPageNumber!;
       final relX = _savedRelativeX!;
       final relY = _savedRelativeY!;
-      final zoom = _savedZoom!;
+      final double widthRatio = (_savedViewWidth != null && _savedViewWidth! > 0 && viewSize.width > 0)
+          ? (viewSize.width / _savedViewWidth!)
+          : 1.0;
+      final zoom = _savedZoom! * widthRatio;
 
       if (savedPage <= layout.pageLayouts.length) {
         final pageRect = layout.pageLayouts[savedPage - 1];
@@ -341,7 +382,6 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     } catch (_) {}
     return null;
   }
-
   // ── Start restoration grace period (clears saved state after durationMs) ──
   void _restorePositionPeriodic({int durationMs = 500}) {
     _isRestoring = true;
@@ -454,18 +494,20 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     }
 
     Future<void> prepareAndReveal() async {
+      try {
+        if (!document.pages.every((p) => p.isLoaded)) {
+          await document.loadPagesProgressively();
+        }
+      } catch (_) {}
+
       applyFullWidthMatrix();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         applyFullWidthMatrix();
-        _dismissSplash();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          applyFullWidthMatrix();
+          _dismissSplash();
+        });
       });
-
-      // Continue background progressive page caching without blocking viewer reveal
-      try {
-        if (!document.pages.every((p) => p.isLoaded)) {
-          unawaited(document.loadPagesProgressively());
-        }
-      } catch (_) {}
     }
 
     prepareAndReveal();
@@ -505,6 +547,8 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   }
 
   void handleInteractionEnd(ScaleEndDetails details) {
+    _isUserTouchingDuringAutoScroll = false;
+    _lastAutoScrollElapsed = Duration.zero;
     try {
       if (!pdfViewerController.isReady) return;
       if (!pdfViewerController.isReady) return;
@@ -573,6 +617,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
   void handleInteractionStart(ScaleStartDetails details) {
     _snappingTimer?.cancel();
+    _isUserTouchingDuringAutoScroll = true;
   }
 
   // ── Called on every visible page change ──
@@ -644,6 +689,7 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   }
 
   void _resetViewer() {
+    stopAutoScroll();
     currentPage.value = 1;
     totalPages.value = 0;
     isDocumentLoading.value = true;
@@ -659,6 +705,8 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
   @override
   void onClose() {
+    stopAutoScroll();
+    _autoScrollTicker?.dispose();
     matrixAnimationController.dispose();
     _savedPositionClearTimer?.cancel();
     _splashTimeoutTimer?.cancel();
@@ -666,6 +714,14 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     _snappingTimer?.cancel();
     // Restore status bar and orientation on exit
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    final isAppDark = Get.isDarkMode;
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: isAppDark ? Brightness.light : Brightness.dark,
+      statusBarBrightness: isAppDark ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: isAppDark ? Brightness.light : Brightness.dark,
+    ));
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -677,7 +733,6 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     searchFocusNode.dispose();
     super.onClose();
   }
-
   void _animateMatrix(Matrix4 targetMatrix) {
     matrixAnimationController.stop();
     matrixAnimation = Matrix4Tween(
@@ -810,8 +865,11 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   void toggleOrientation() {
     _saveCurrentPosition();
     final context = Get.context;
-    if (context == null) return;
-    final isPortrait = context.mediaQuery.orientation == Orientation.portrait;
+    final isPortrait = context != null
+        ? MediaQuery.of(context).orientation == Orientation.portrait
+        : (pdfViewerController.isReady
+            ? pdfViewerController.viewSize.width < pdfViewerController.viewSize.height
+            : true);
     if (isPortrait) {
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.landscapeLeft,
@@ -825,6 +883,222 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
     _restorePositionPeriodic(durationMs: 800);
   }
 
+  // ── Continuous Smooth Auto-Scroll API ──
+  void _onAutoScrollTick(Duration elapsed) {
+    final dt = (elapsed - _lastAutoScrollElapsed).inMicroseconds / 1000000.0;
+    _lastAutoScrollElapsed = elapsed;
+    if (dt <= 0 || dt > 0.1) return;
+    if (!isAutoScrolling.value || isAutoScrollPaused.value || _isUserTouchingDuringAutoScroll) return;
+    if (!pdfViewerController.isReady) return;
+
+    try {
+      final viewSize = pdfViewerController.viewSize;
+      final layout = pdfViewerController.layout;
+      final zoom = pdfViewerController.currentZoom;
+      if (zoom <= 0 || viewSize.height <= 0) return;
+
+      // Base comfortable reading speed: 38 logical screen pixels per second at 1.0x
+      final double screenPixelsDelta = 38.0 * autoScrollSpeed.value * dt;
+      final double docDelta = screenPixelsDelta / zoom;
+
+      final currentCenter = pdfViewerController.centerPosition;
+      if (isSinglePageMode.value) {
+        final hw = viewSize.width / 2 / zoom;
+        final maxX = layout.documentSize.width - hw;
+        if (currentCenter.dx >= maxX - 0.5) {
+          isAutoScrollPaused.value = true;
+          return;
+        }
+        final nextX = (currentCenter.dx + docDelta).clamp(hw, maxX > hw ? maxX : hw);
+        pdfViewerController.value = pdfViewerController.calcMatrixFor(
+          Offset(nextX, currentCenter.dy),
+          zoom: zoom,
+          viewSize: viewSize,
+        );
+      } else {
+        final hh = viewSize.height / 2 / zoom;
+        final maxY = layout.documentSize.height - hh;
+        if (currentCenter.dy >= maxY - 0.5) {
+          isAutoScrollPaused.value = true;
+          return;
+        }
+        final nextY = (currentCenter.dy + docDelta).clamp(hh, maxY > hh ? maxY : hh);
+        pdfViewerController.value = pdfViewerController.calcMatrixFor(
+          Offset(currentCenter.dx, nextY),
+          zoom: zoom,
+          viewSize: viewSize,
+        );
+      }
+    } catch (_) {}
+  }
+
+  void toggleAutoScroll() {
+    if (isAutoScrolling.value) {
+      stopAutoScroll();
+    } else {
+      startAutoScroll();
+    }
+  }
+
+  void startAutoScroll() {
+    isAutoScrolling.value = true;
+    isAutoScrollPaused.value = false;
+    _isUserTouchingDuringAutoScroll = false;
+    isAutoScrollHudMinimized.value = false;
+    isAutoScrollHudFaded.value = false;
+    resetAutoMinimizeTimer();
+    _bubbleFadeTimer?.cancel();
+    if (showOverlay.value) {
+      showOverlay.value = false;
+      _updateStatusBar();
+    }
+    _autoScrollTicker ??= createTicker(_onAutoScrollTick);
+    _lastAutoScrollElapsed = Duration.zero;
+    if (!_autoScrollTicker!.isActive) {
+      _autoScrollTicker!.start();
+    }
+  }
+
+  void stopAutoScroll() {
+    isAutoScrolling.value = false;
+    isAutoScrollPaused.value = false;
+    _isUserTouchingDuringAutoScroll = false;
+    _autoMinimizeTimer?.cancel();
+    _bubbleFadeTimer?.cancel();
+    isAutoScrollHudFaded.value = false;
+    isAutoScrollHudMinimized.value = false;
+    autoScrollBubblePosition.value = null;
+    _autoScrollTicker?.stop();
+    _lastAutoScrollElapsed = Duration.zero;
+  }
+
+  /// Automatically collapses the full bar into the circular bubble after 5 seconds of inactivity.
+  void resetAutoMinimizeTimer() {
+    _autoMinimizeTimer?.cancel();
+    if (!isAutoScrolling.value || isAutoScrollHudMinimized.value) return;
+    _autoMinimizeTimer = Timer(const Duration(seconds: 5), () {
+      if (isAutoScrolling.value && !isAutoScrollHudMinimized.value) {
+        minimizeAutoScrollHud(auto: true);
+      }
+    });
+  }
+
+  /// Collapses full bar into the floating bubble (starts at 100% opacity, fades after 3 seconds).
+  /// [auto] true: collapsed after idle -> becomes transparent immediately.
+  /// [auto] false: manual collapse -> stays solid for 3 seconds, then fades.
+  void minimizeAutoScrollHud({bool auto = false}) {
+    _autoMinimizeTimer?.cancel();
+    _bubbleFadeTimer?.cancel();
+    isAutoScrollHudMinimized.value = true;
+    if (auto) {
+      isAutoScrollHudFaded.value = true;
+    } else {
+      resetBubbleFadeTimer();
+    }
+  }
+
+  /// Timer for circular bubble: fades to semi-transparent after 3 seconds of inactivity.
+  void resetBubbleFadeTimer() {
+    _bubbleFadeTimer?.cancel();
+    isAutoScrollHudFaded.value = false;
+    if (!isAutoScrolling.value || !isAutoScrollHudMinimized.value) return;
+    _bubbleFadeTimer = Timer(const Duration(seconds: 3), () {
+      if (isAutoScrolling.value && isAutoScrollHudMinimized.value) {
+        isAutoScrollHudFaded.value = true;
+      }
+    });
+  }
+
+  /// Expands floating bubble back to the full bar with solid 100% opacity.
+  void expandAutoScrollHud() {
+    _bubbleFadeTimer?.cancel();
+    isAutoScrollHudFaded.value = false;
+    isAutoScrollHudMinimized.value = false;
+    resetAutoMinimizeTimer();
+  }
+
+  void toggleAutoScrollHudMinimized() {
+    if (isAutoScrollHudMinimized.value) {
+      expandAutoScrollHud();
+    } else {
+      minimizeAutoScrollHud();
+    }
+  }
+
+  void toggleAutoScrollPause() {
+    if (!isAutoScrolling.value) {
+      startAutoScroll();
+      return;
+    }
+    isAutoScrollPaused.value = !isAutoScrollPaused.value;
+    _lastAutoScrollElapsed = Duration.zero;
+    if (isAutoScrollHudMinimized.value) {
+      resetBubbleFadeTimer();
+    } else {
+      resetAutoMinimizeTimer();
+    }
+  }
+
+  void increaseAutoScrollSpeed() {
+    final current = autoScrollSpeed.value;
+    for (final preset in autoScrollSpeedPresets) {
+      if (preset > current + 0.01) {
+        autoScrollSpeed.value = preset;
+        _storageService.saveAutoScrollSpeed(preset);
+        if (isAutoScrollHudMinimized.value) {
+          resetBubbleFadeTimer();
+        } else {
+          resetAutoMinimizeTimer();
+        }
+        return;
+      }
+    }
+  }
+
+  void decreaseAutoScrollSpeed() {
+    final current = autoScrollSpeed.value;
+    for (int i = autoScrollSpeedPresets.length - 1; i >= 0; i--) {
+      if (autoScrollSpeedPresets[i] < current - 0.01) {
+        autoScrollSpeed.value = autoScrollSpeedPresets[i];
+        _storageService.saveAutoScrollSpeed(autoScrollSpeedPresets[i]);
+        if (isAutoScrollHudMinimized.value) {
+          resetBubbleFadeTimer();
+        } else {
+          resetAutoMinimizeTimer();
+        }
+        return;
+      }
+    }
+  }
+
+  void resetAutoScrollSpeed() {
+    autoScrollSpeed.value = 1.0;
+    _storageService.saveAutoScrollSpeed(1.0);
+    if (isAutoScrollHudMinimized.value) {
+      resetBubbleFadeTimer();
+    } else {
+      resetAutoMinimizeTimer();
+    }
+  }
+
+  void setCustomAutoScrollSpeed(double speed) {
+    final clamped = speed.clamp(0.1, 20.0);
+    autoScrollSpeed.value = double.parse(clamped.toStringAsFixed(2));
+    _storageService.saveAutoScrollSpeed(autoScrollSpeed.value);
+    if (isAutoScrollHudMinimized.value) {
+      resetBubbleFadeTimer();
+    } else {
+      resetAutoMinimizeTimer();
+    }
+  }
+
+  void showSpeedPickerDialog() {
+    Get.bottomSheet(
+      const SpeedPickerSheet(),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+    );
+  }
   // ── Color Theme Utilities ──
   Color get themeBackgroundColor {
     switch (readingTheme.value) {
@@ -870,25 +1144,34 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
   // ── Share & Print Actions ──
   void shareCurrentPdf() {
     final pdf = currentPdf;
-    if (pdf != null) {
-      Share.shareXFiles([XFile(pdf.path)], text: pdf.name);
+    if (pdf != null && File(pdf.path).existsSync()) {
+      try {
+        SharePlus.instance.share(ShareParams(
+          files: [XFile(pdf.path)],
+          text: pdf.name,
+          sharePositionOrigin: Rect.fromLTWH(0, 0, Get.width, Get.height / 2),
+        ));
+      } catch (e) {
+        debugPrint('Share error: $e');
+      }
     }
   }
 
   void printCurrentPdf() {
     final pdf = currentPdf;
-    if (pdf != null) {
-      Get.snackbar(
-        'print'.tr,
-        'print_spooler_msg'.trParams({'name': pdf.name}),
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Get.theme.primaryColor,
-        colorText: Colors.white,
-      );
-      Share.shareXFiles([XFile(pdf.path)], subject: 'Print ${pdf.name}');
+    if (pdf != null && File(pdf.path).existsSync()) {
+      AppToast.showInfo('print_spooler_msg'.trParams({'name': pdf.name}));
+      try {
+        SharePlus.instance.share(ShareParams(
+          files: [XFile(pdf.path)],
+          subject: 'Print ${pdf.name}',
+          sharePositionOrigin: Rect.fromLTWH(0, 0, Get.width, Get.height / 2),
+        ));
+      } catch (e) {
+        debugPrint('Print share error: $e');
+      }
     }
   }
-
   // ── Save As Action ──
   Future<void> saveAsCurrentPdf() async {
     final pdf = currentPdf;
@@ -899,22 +1182,11 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
         final sourceFile = File(pdf.path);
         final targetPath = p.join(selectedDirectory, pdf.name);
         await sourceFile.copy(targetPath);
-        Get.snackbar(
-          'saved_successfully'.tr,
-          'saved_to'.trParams({'path': targetPath}),
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: Colors.green.shade800,
-          colorText: Colors.white,
-        );
+        await PdfToolsService.notifyMediaStore(targetPath);
+        AppToast.showSuccess('saved_to'.trParams({'path': targetPath}));
       }
     } catch (e) {
-      Get.snackbar(
-        'error'.tr,
-        'failed_to_save'.trParams({'error': '$e'}),
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red.shade800,
-        colorText: Colors.white,
-      );
+      AppToast.showError('failed_to_save'.trParams({'error': '$e'}));
     }
   }
 
@@ -929,55 +1201,33 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
       lastMod = file.lastModifiedSync();
     } catch (_) {}
 
-    final dialogTheme = Get.theme;
+    final ctx = Get.overlayContext ?? Get.context;
+    if (ctx == null || !ctx.mounted) return;
+    final dialogTheme = Theme.of(ctx);
 
-    Get.dialog(
-      Dialog(
-        backgroundColor: dialogTheme.scaffoldBackgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.info_outline, color: dialogTheme.primaryColor, size: 24),
-                      const SizedBox(width: 8),
-                      Text(
-                        'file_details'.tr,
-                        style: TextStyle(
-                          color: dialogTheme.colorScheme.onSurface,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _detailRow(dialogTheme, 'details_name'.tr, pdf.name),
-                  _detailRow(dialogTheme, 'details_size'.tr, FileUtils.formatSize(pdf.size)),
-                  _detailRow(dialogTheme, 'details_path'.tr, pdf.path),
-                  _detailRow(dialogTheme, 'details_total_pages'.tr, '${totalPages.value}'),
-                  _detailRow(dialogTheme, 'details_last_modified'.tr, lastMod.toString().split('.').first),
-                  const SizedBox(height: 20),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () => Get.back(),
-                      child: Text('close'.tr, style: TextStyle(color: dialogTheme.primaryColor)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+    LuxuryDialog.show(
+      ctx,
+      compact: true,
+      icon: Icons.info_outline_rounded,
+      title: 'file_details'.tr,
+      maxWidth: 400,
+      body: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _detailRow(dialogTheme, 'details_name'.tr, pdf.name),
+              _detailRow(dialogTheme, 'details_size'.tr, FileUtils.formatSize(pdf.size)),
+              _detailRow(dialogTheme, 'details_path'.tr, pdf.path),
+              _detailRow(dialogTheme, 'details_total_pages'.tr, '${totalPages.value}'),
+              _detailRow(dialogTheme, 'details_last_modified'.tr, lastMod.toString().split('.').first),
+            ],
           ),
         ),
       ),
+      primaryButtonText: 'close'.tr,
+      primaryButtonIcon: Icons.check_rounded,
     );
   }
 
@@ -1002,88 +1252,55 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
   // ── Kindle-style Go To Page Dialog ──
   void showGoToPageDialog() {
-    final dialogTheme = Get.theme;
+    final ctx = Get.overlayContext ?? Get.context;
+    if (ctx == null || !ctx.mounted) return;
+    final dialogTheme = Theme.of(ctx);
     final textController = TextEditingController(text: '${currentPage.value}');
-    Get.dialog(
-      Dialog(
-        backgroundColor: dialogTheme.scaffoldBackgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'go_to_page'.tr,
-                    style: TextStyle(
-                      color: dialogTheme.colorScheme.onSurface,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'enter_page_number'.trParams({'total': '${totalPages.value}'}),
-                    style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: textController,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: dialogTheme.cardColor,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                      hintStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.4)),
-                    ),
-                    autofocus: true,
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      TextButton(
-                        onPressed: () => Get.back(),
-                        child: Text('cancel'.tr, style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6))),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: dialogTheme.primaryColor,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                        ),
-                        onPressed: () {
-                          final val = int.tryParse(textController.text);
-                          if (val != null && val >= 1 && val <= totalPages.value) {
-                            jumpToPage(val);
-                            Get.back();
-                          } else {
-                            Get.snackbar(
-                              'invalid_page'.tr,
-                              'enter_valid_page_range'.trParams({'total': '${totalPages.value}'}),
-                              snackPosition: SnackPosition.BOTTOM,
-                              backgroundColor: Colors.red.shade800,
-                              colorText: Colors.white,
-                            );
-                          }
-                        },
-                        child: Text('apply'.tr, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+
+    LuxuryDialog.showCustom(
+      ctx,
+      builder: (dCtx) => LuxuryDialog(
+        compact: true,
+        icon: Icons.find_in_page_rounded,
+        title: 'go_to_page'.tr,
+        message: 'enter_page_number'.trParams({'total': '${totalPages.value}'}),
+        body: TextField(
+          controller: textController,
+          keyboardType: TextInputType.number,
+          textAlign: TextAlign.center,
+          autofocus: true,
+          style: TextStyle(
+            color: dialogTheme.colorScheme.onSurface,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: dialogTheme.scaffoldBackgroundColor,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: dialogTheme.dividerColor.withValues(alpha: 0.4)),
             ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: dialogTheme.dividerColor.withValues(alpha: 0.4)),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
         ),
+        secondaryButtonText: 'cancel'.tr,
+        primaryButtonText: 'apply'.tr,
+        primaryButtonIcon: Icons.arrow_forward_rounded,
+        closeOnPrimary: false,
+        onPrimaryPressed: () {
+          final val = int.tryParse(textController.text.trim());
+          if (val != null && val >= 1 && val <= totalPages.value) {
+            jumpToPage(val);
+            Navigator.of(dCtx).pop();
+          } else {
+            AppToast.showWarning('enter_valid_page_range'.trParams({'total': '${totalPages.value}'}));
+          }
+        },
       ),
     );
   }
@@ -1095,97 +1312,26 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
     Get.showOverlay(
       asyncFunction: () async {
-        try {
-          final doc = await PdfDocument.openFile(pdf.path);
-          final buffer = StringBuffer();
-          for (int i = 1; i <= doc.pages.length; i++) {
-            final page = doc.pages[i - 1];
-            final text = await page.loadText();
-            buffer.writeln('--- Page $i ---');
-            buffer.writeln(text);
-          }
-          await doc.dispose();
-
-          final txtPath = p.setExtension(pdf.path, '.txt');
-          final txtFile = File(txtPath);
-          await txtFile.writeAsString(buffer.toString());
-
-          Get.snackbar(
-            'success'.tr,
-            'text_extracted_to'.trParams({'name': p.basename(txtPath)}),
-            snackPosition: SnackPosition.BOTTOM,
-            backgroundColor: Colors.green.shade800,
-            colorText: Colors.white,
+        final res = await PdfToolsService().extractText(pdf.path);
+        if (res.isSuccess && Get.context != null) {
+          ToolResultSheet.show(
+            Get.context!,
+            result: res,
+            title: 'extract_text'.tr,
           );
-        } catch (e) {
-          Get.snackbar(
-            'error'.tr,
-            'failed_to_extract'.trParams({'error': '$e'}),
-            backgroundColor: Colors.red.shade800,
-            colorText: Colors.white,
-          );
+        } else if (!res.isSuccess) {
+          AppToast.showError(res.errorMessage ?? 'failed_to_extract'.trParams({'error': ''}));
         }
       },
       loadingWidget: const Center(child: CircularProgressIndicator()),
     );
   }
 
-  Future<void> convertPdfToImages() async {
+  void convertPdfToImages() {
     final pdf = currentPdf;
-    if (pdf == null) return;
-
-    Get.showOverlay(
-      asyncFunction: () async {
-        try {
-          final doc = await PdfDocument.openFile(pdf.path);
-          final baseName = p.basenameWithoutExtension(pdf.path);
-          final dirPath = p.join(p.dirname(pdf.path), '${baseName}_images');
-          final dir = Directory(dirPath);
-          if (!await dir.exists()) {
-            await dir.create(recursive: true);
-          }
-
-          final total = doc.pages.length;
-          // Process first 10 pages maximum or all pages if under 10
-          final limit = total > 10 ? 10 : total;
-          
-          for (int i = 1; i <= limit; i++) {
-            final page = doc.pages[i - 1];
-            final pageImage = await page.render(
-              width: page.width.round() * 2,
-              height: page.height.round() * 2,
-            );
-            if (pageImage != null) {
-              final uiImage = await pageImage.createImage();
-              final byteData = await uiImage.toByteData(format: uiImageFormatPng);
-              if (byteData != null) {
-                final pngBytes = byteData.buffer.asUint8List();
-                final imgFile = File(p.join(dirPath, 'page_$i.png'));
-                await imgFile.writeAsBytes(pngBytes);
-              }
-              pageImage.dispose();
-            }
-          }
-          await doc.dispose();
-
-          Get.snackbar(
-            'success'.tr,
-            'first_pages_exported'.trParams({'limit': '$limit', 'name': p.basename(dirPath)}),
-            snackPosition: SnackPosition.BOTTOM,
-            backgroundColor: Colors.green.shade800,
-            colorText: Colors.white,
-          );
-        } catch (e) {
-          Get.snackbar(
-            'error'.tr,
-            '$e',
-            backgroundColor: Colors.red.shade800,
-            colorText: Colors.white,
-          );
-        }
-      },
-      loadingWidget: const Center(child: CircularProgressIndicator()),
-    );
+    if (pdf != null) {
+      Get.to(() => PdfToImageView(initialFilePath: pdf.path));
+    }
   }
 
   // Helper mapping for pdfrx rendering format
@@ -1197,42 +1343,15 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
     Get.showOverlay(
       asyncFunction: () async {
-        try {
-          await Future.delayed(const Duration(seconds: 2));
-
-          final originalFile = File(pdf.path);
-          final compressedPath = p.join(
-            p.dirname(pdf.path),
-            '${p.basenameWithoutExtension(pdf.path)}_compressed.pdf',
+        final res = await PdfToolsService().compressPdf(pdf.path);
+        if (res.isSuccess && Get.context != null) {
+          ToolResultSheet.show(
+            Get.context!,
+            result: res,
+            title: 'compress_pdf'.tr,
           );
-
-          await originalFile.copy(compressedPath);
-
-          final origSize = await originalFile.length();
-          final compSize = (origSize * 0.73).round();
-
-          final sizeOrigStr = FileUtils.formatSize(origSize);
-          final sizeCompStr = FileUtils.formatSize(compSize);
-
-          Get.snackbar(
-            'success'.tr,
-            'pdf_compressed_success'.trParams({
-              'origStr': sizeOrigStr,
-              'compStr': sizeCompStr,
-              'path': p.basename(compressedPath),
-            }),
-            snackPosition: SnackPosition.BOTTOM,
-            backgroundColor: Colors.green.shade800,
-            colorText: Colors.white,
-            duration: const Duration(seconds: 4),
-          );
-        } catch (e) {
-          Get.snackbar(
-            'error'.tr,
-            '$e',
-            backgroundColor: Colors.red.shade800,
-            colorText: Colors.white,
-          );
+        } else if (!res.isSuccess) {
+          AppToast.showError(res.errorMessage ?? 'فشل ضغط الملف');
         }
       },
       loadingWidget: const Center(child: CircularProgressIndicator()),
@@ -1241,194 +1360,51 @@ class ReaderController extends GetxController with GetSingleTickerProviderStateM
 
   // ── Advanced Tools Actions ──
   void mergeDocumentsDialog() {
-    final dialogTheme = Get.theme;
-    Get.dialog(
-      Dialog(
-        backgroundColor: dialogTheme.scaffoldBackgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.merge_type, color: dialogTheme.primaryColor, size: 40),
-                  const SizedBox(height: 12),
-                  Text(
-                    'merge_documents'.tr,
-                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'merge_documents_desc'.tr,
-                    style: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: dialogTheme.primaryColor,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    onPressed: () {
-                      Get.back();
-                      Get.snackbar(
-                        'merge_documents'.tr,
-                        'merge_completed'.tr,
-                        snackPosition: SnackPosition.BOTTOM,
-                        backgroundColor: Colors.green.shade800,
-                        colorText: Colors.white,
-                      );
-                    },
-                    child: Text('start_merge'.tr, style: const TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    final pdf = currentPdf;
+    Get.to(() => MergePdfView(initialFilePath: pdf?.path));
   }
 
   void splitPagesDialog() {
-    final dialogTheme = Get.theme;
-    final fromController = TextEditingController(text: '1');
-    final toController = TextEditingController(text: '${totalPages.value}');
-    Get.dialog(
-      Dialog(
-        backgroundColor: dialogTheme.scaffoldBackgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.call_split, color: dialogTheme.primaryColor, size: 40),
-                  const SizedBox(height: 12),
-                  Text(
-                    'split_pdf_pages'.tr,
-                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: fromController,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: 'from_page'.tr,
-                            labelStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6)),
-                          ),
-                          style: TextStyle(color: dialogTheme.colorScheme.onSurface),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextField(
-                          controller: toController,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: 'to_page'.tr,
-                            labelStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.6)),
-                          ),
-                          style: TextStyle(color: dialogTheme.colorScheme.onSurface),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: dialogTheme.primaryColor,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    onPressed: () {
-                      Get.back();
-                      Get.snackbar(
-                        'split_pdf_pages'.tr,
-                        'split_completed'.trParams({'from': fromController.text, 'to': toController.text}),
-                        snackPosition: SnackPosition.BOTTOM,
-                        backgroundColor: Colors.green.shade800,
-                        colorText: Colors.white,
-                      );
-                    },
-                    child: Text('split_pdf'.tr, style: const TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    final pdf = currentPdf;
+    if (pdf != null) {
+      Get.to(() => SplitPdfView(initialFilePath: pdf.path));
+    }
   }
-
   void addWatermarkDialog() {
-    final dialogTheme = Get.theme;
+    final ctx = Get.overlayContext ?? Get.context;
+    if (ctx == null || !ctx.mounted) return;
+    final dialogTheme = Theme.of(ctx);
     final txtController = TextEditingController(text: watermarkText.value);
-    Get.dialog(
-      Dialog(
-        backgroundColor: dialogTheme.scaffoldBackgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.branding_watermark_outlined, color: dialogTheme.primaryColor, size: 40),
-                  const SizedBox(height: 12),
-                  Text(
-                    'add_rotated_watermark'.tr,
-                    style: TextStyle(color: dialogTheme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: txtController,
-                    decoration: InputDecoration(
-                      hintText: 'e.g. CONFIDENTIAL',
-                      hintStyle: TextStyle(color: dialogTheme.colorScheme.onSurface.withOpacity(0.4)),
-                    ),
-                    style: TextStyle(color: dialogTheme.colorScheme.onSurface),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          watermarkText.value = '';
-                          Get.back();
-                        },
-                        child: Text('clear'.tr, style: const TextStyle(color: Colors.red)),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: dialogTheme.primaryColor,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () {
-                          watermarkText.value = txtController.text;
-                          Get.back();
-                        },
-                        child: Text('apply'.tr, style: const TextStyle(color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+
+    LuxuryDialog.showCustom(
+      ctx,
+      builder: (dCtx) => LuxuryDialog(
+        compact: true,
+        icon: Icons.branding_watermark_rounded,
+        title: 'add_rotated_watermark'.tr,
+        body: TextField(
+          controller: txtController,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'e.g. CONFIDENTIAL',
+            hintStyle: TextStyle(
+              color: dialogTheme.colorScheme.onSurface.withValues(alpha: 0.4),
             ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
+          style: TextStyle(color: dialogTheme.colorScheme.onSurface),
         ),
+        secondaryButtonText: 'clear'.tr,
+        secondaryButtonColor: Colors.redAccent,
+        onSecondaryPressed: () {
+          watermarkText.value = '';
+        },
+        primaryButtonText: 'apply'.tr,
+        primaryButtonIcon: Icons.check_rounded,
+        onPrimaryPressed: () {
+          watermarkText.value = txtController.text;
+        },
       ),
     );
   }

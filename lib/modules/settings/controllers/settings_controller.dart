@@ -1,10 +1,12 @@
 // lib/modules/settings/controllers/settings_controller.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:pdf_reader/core/services/storage_service.dart';
 import 'package:pdf_reader/core/services/theme_controller.dart';
 import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
 
 class SettingsController extends GetxController {
   final StorageService _storageService = Get.find<StorageService>();
@@ -70,43 +72,32 @@ class SettingsController extends GetxController {
   void showRatingDialog(BuildContext context) {
     final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
     final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
     final primaryColor = Theme.of(context).primaryColor;
     final RxInt rating = 5.obs;
     final TextEditingController feedbackTextController = TextEditingController();
 
-    Get.dialog(
-      AlertDialog(
-        scrollable: true,
-        backgroundColor: cardBg,
-        title: Center(
-          child: Text(
-            'rate_app'.tr,
-            style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.bold),
-          ),
-        ),
-        content: Column(
+    LuxuryDialog.showCustom(
+      context,
+      builder: (dCtx) => LuxuryDialog(
+        compact: true,
+        accentColor: const Color(0xFFF59E0B),
+        icon: Icons.star_rounded,
+        title: 'rate_app'.tr,
+        message: 'rate_desc'.tr,
+        body: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'rate_desc'.tr,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: textSecondaryColor, fontSize: 13),
-            ),
-            const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(5, (index) {
                 return Obx(() => GestureDetector(
-                  onTap: () {
-                    rating.value = index + 1;
-                  },
+                  onTap: () => rating.value = index + 1,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                     child: Icon(
                       index < rating.value ? Icons.star_rounded : Icons.star_border_rounded,
-                      color: Colors.amber,
-                      size: 36,
+                      color: const Color(0xFFF59E0B),
+                      size: 34,
                     ),
                   ),
                 ));
@@ -119,66 +110,52 @@ class SettingsController extends GetxController {
               style: TextStyle(color: textPrimaryColor, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'write_feedback_hint'.tr,
-                hintStyle: TextStyle(color: textSecondaryColor.withOpacity(0.6), fontSize: 12),
+                hintStyle: TextStyle(color: textSecondaryColor.withValues(alpha: 0.6), fontSize: 12),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 filled: true,
-                fillColor: Theme.of(context).scaffoldBackgroundColor,
+                fillColor: Theme.of(dCtx).scaffoldBackgroundColor,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5)),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Theme.of(dCtx).dividerColor.withValues(alpha: 0.5)),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.3)),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Theme.of(dCtx).dividerColor.withValues(alpha: 0.3)),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: primaryColor),
                 ),
               ),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: Text('cancel'.tr, style: TextStyle(color: textSecondaryColor)),
-          ),
-          TextButton(
-            onPressed: () async {
-              final rateVal = rating.value;
-              final feedbackText = feedbackTextController.text;
-              
-              Get.back();
-              
-              final Uri emailLaunchUri = Uri(
-                scheme: 'mailto',
-                path: 'musab.dev.app@gmail.com',
-                queryParameters: {
-                  'subject': 'Aura PDF Feedback (Rating: $rateVal/5)',
-                  'body': 'Rating: $rateVal/5\n\nFeedback:\n$feedbackText',
-                },
-              );
-              
-              try {
-                if (await canLaunchUrl(emailLaunchUri)) {
-                  await launchUrl(emailLaunchUri);
-                }
-              } catch (_) {}
+        secondaryButtonText: 'cancel'.tr,
+        primaryButtonText: 'submit'.tr,
+        primaryButtonIcon: Icons.send_rounded,
+        onPrimaryPressed: () async {
+          final rateVal = rating.value;
+          final feedbackText = feedbackTextController.text;
 
-              Future.delayed(const Duration(milliseconds: 300), () {
-                Get.snackbar(
-                  'thank_you'.tr,
-                  'rating_submitted'.tr,
-                  snackPosition: SnackPosition.BOTTOM,
-                  backgroundColor: primaryColor.withOpacity(0.12),
-                  colorText: primaryColor,
-                );
-              });
+          final Uri emailLaunchUri = Uri(
+            scheme: 'mailto',
+            path: 'musab.dev.app@gmail.com',
+            queryParameters: {
+              'subject': 'Aura PDF Feedback (Rating: $rateVal/5)',
+              'body': 'Rating: $rateVal/5\n\nFeedback:\n$feedbackText',
             },
-            child: Text('submit'.tr, style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
-          ),
-        ],
+          );
+
+          try {
+            if (await canLaunchUrl(emailLaunchUri)) {
+              await launchUrl(emailLaunchUri);
+            }
+          } catch (_) {}
+
+          Future.delayed(const Duration(milliseconds: 300), () {
+            AppToast.showSuccess('rating_submitted'.tr);
+          });
+        },
       ),
     );
   }

@@ -1,8 +1,10 @@
 // lib/modules/folder/controllers/folder_controller.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf_reader/core/services/storage_service.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/data/models/pdf_file_model.dart';
 import 'package:pdf_reader/domain/entities/pdf_entity.dart';
@@ -19,7 +21,7 @@ class FolderController extends GetxController {
   final RxString folderPath = ''.obs;
   final Rx<PdfEntity?> lastReadFile = Rx<PdfEntity?>(null);
   final RxInt lastReadPage = 0.obs;
-  
+
   final RxString sortOrder = 'name'.obs; // 'name', 'date', 'size'
   final RxBool isAscending = true.obs;
 
@@ -38,7 +40,7 @@ class FolderController extends GetxController {
   void toggleSelection(String path) {
     final status = getRxSelected(path);
     status.value = !status.value;
-    
+
     if (status.value) {
       selectedPaths.add(path);
       isSelectionMode.value = true;
@@ -91,12 +93,30 @@ class FolderController extends GetxController {
   Future<void> shareSelected() async {
     if (selectedPaths.isEmpty) return;
     try {
-      final List<XFile> xFiles = selectedPaths.map((path) => XFile(path)).toList();
-      await Share.shareXFiles(xFiles);
-    } catch (e) {
-      Get.snackbar('error'.tr, 'Share failed: $e', snackPosition: SnackPosition.BOTTOM);
-    } finally {
+      final List<XFile> xFiles = [];
+      for (final path in selectedPaths) {
+        if (File(path).existsSync()) {
+          xFiles.add(XFile(path));
+        } else if (Directory(path).existsSync()) {
+          final dirFiles = await FileUtils.scanPdfFiles(path);
+          for (final f in dirFiles) {
+            xFiles.add(XFile(f.path));
+          }
+        }
+      }
+
+      if (xFiles.isEmpty) {
+        AppToast.showWarning('no_files_found'.tr);
+        return;
+      }
+
       clearSelection();
+      await SharePlus.instance.share(ShareParams(
+        files: xFiles,
+        sharePositionOrigin: Rect.fromLTWH(0, 0, Get.width, Get.height / 2),
+      ));
+    } catch (e) {
+      debugPrint('Share failed: $e');
     }
   }
 
@@ -119,7 +139,7 @@ class FolderController extends GetxController {
     }
     clearSelection();
     await refresh();
-    
+
     // Sync home screen
     try {
       final homeController = Get.find<HomeController>();
@@ -203,8 +223,7 @@ class FolderController extends GetxController {
       // Find the file the user was last reading (highest lastRead date with progress > 0)
       _findLastReadFile();
     } catch (e) {
-      Get.snackbar('Error', 'Cannot read folder: $e',
-          snackPosition: SnackPosition.BOTTOM);
+      AppToast.showError('تعذر قراءة المجلد: $e');
     } finally {
       isLoading.value = false;
     }
@@ -247,13 +266,13 @@ class FolderController extends GetxController {
       dateModified: pdf.lastRead ?? DateTime.now(),
     );
     _storageService.toggleFavorite(item);
-    
+
     // Force sync with HomeController
     try {
       final homeController = Get.find<HomeController>();
       homeController.refreshLibrary();
     } catch (_) {}
-    
+
     update();
   }
 
@@ -278,10 +297,10 @@ class FolderController extends GetxController {
         changed = true;
       }
     }
-    
+
     _findLastReadFile();
     pdfFiles.refresh();
-    
+
     if (changed) {
       _applySort();
     }

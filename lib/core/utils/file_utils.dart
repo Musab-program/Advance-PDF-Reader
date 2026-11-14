@@ -267,4 +267,42 @@ class FileUtils {
     // Fallback to standard alphabetical comparison
     return a.toLowerCase().compareTo(b.toLowerCase());
   }
+
+  /// Calculate total size of a directory by summing the size of all files inside it recursively
+  static int getDirectorySizeBytesSync(String dirPath) {
+    try {
+      final dir = Directory(dirPath);
+      if (!dir.existsSync()) return 0;
+      int total = 0;
+      for (final entity in dir.listSync(recursive: true, followLinks: false)) {
+        if (entity is File) {
+          try {
+            total += entity.lengthSync();
+          } catch (_) {}
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Async calculation of directory size
+  static Future<int> getDirectorySizeBytes(String dirPath) async {
+    try {
+      final dir = Directory(dirPath);
+      if (!await dir.exists()) return 0;
+      int total = 0;
+      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+        if (entity is File) {
+          try {
+            total += await entity.length();
+          } catch (_) {}
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
 }
