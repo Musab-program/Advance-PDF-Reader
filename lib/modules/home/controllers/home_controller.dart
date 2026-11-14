@@ -8,13 +8,15 @@ import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf_reader/core/services/storage_service.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/domain/entities/library_item.dart';
+import 'package:flutter_zoom_drawer/flutter_zoom_drawer.dart';
 
 class HomeController extends GetxController {
   final StorageService _storageService = Get.find<StorageService>();
+  final ZoomDrawerController zoomDrawerController = ZoomDrawerController();
 
   final RxInt currentTab = 0.obs; // 0: Files, 1: Folders, 2: Favorites, 3: Recents
 
@@ -200,40 +202,33 @@ class HomeController extends GetxController {
 
   Future<void> shareSelected() async {
     if (selectedPaths.isEmpty) return;
-    isLoading.value = true;
     try {
       final List<XFile> xFiles = [];
-      final tempDir = await getTemporaryDirectory();
-      
       for (final path in selectedPaths) {
-        final file = File(path);
-        if (file.existsSync()) {
-          final tempPath = p.join(tempDir.path, p.basename(path));
-          final tempFile = await file.copy(tempPath);
-          xFiles.add(XFile(tempFile.path));
+        if (File(path).existsSync()) {
+          xFiles.add(XFile(path));
         } else if (Directory(path).existsSync()) {
           final folderFiles = await FileUtils.scanPdfFiles(path);
           for (final f in folderFiles) {
-            final tempPath = p.join(tempDir.path, p.basename(f.path));
-            final tempFile = await f.copy(tempPath);
-            xFiles.add(XFile(tempFile.path));
+            xFiles.add(XFile(f.path));
           }
         }
       }
-      
-      if (xFiles.isNotEmpty) {
-        await Share.shareXFiles(xFiles);
-      } else {
-        Get.snackbar('error'.tr, 'No shareable files found.', snackPosition: SnackPosition.BOTTOM);
+
+      if (xFiles.isEmpty) {
+        AppToast.showWarning('no_files_found'.tr);
+        return;
       }
-    } catch (e) {
-      Get.snackbar('error'.tr, 'Share failed: $e', snackPosition: SnackPosition.BOTTOM);
-    } finally {
-      isLoading.value = false;
+
       clearSelection();
+      await SharePlus.instance.share(ShareParams(
+        files: xFiles,
+        sharePositionOrigin: Rect.fromLTWH(0, 0, Get.width, Get.height / 2),
+      ));
+    } catch (e) {
+      debugPrint('Share failed: $e');
     }
   }
-
   Future<void> deleteSelected() async {
     if (selectedPaths.isEmpty) return;
     
@@ -600,24 +595,14 @@ class HomeController extends GetxController {
     // Check PDF content
     final files = await FileUtils.scanPdfFiles(selectedDirectory);
     if (files.isEmpty) {
-      Get.snackbar(
-        'invalid_folder'.tr,
-        'invalid_folder_desc'.tr,
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: const Color(0xFFC0392B),
-        colorText: Colors.white,
-      );
+      AppToast.showError('invalid_folder_desc'.tr);
       return;
     }
 
     // Check if already added
     final existingIdx = libraryItems.indexWhere((item) => item.path == selectedDirectory);
     if (existingIdx >= 0) {
-      Get.snackbar(
-        'already_added'.tr,
-        'folder_already_added'.tr,
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.showInfo('folder_already_added'.tr);
       // Even if already added, open it immediately
       openFolder(libraryItems[existingIdx]);
       return;
@@ -659,11 +644,7 @@ class HomeController extends GetxController {
     // Check if already added
     final existingIdx = libraryItems.indexWhere((item) => item.path == filePath);
     if (existingIdx >= 0) {
-      Get.snackbar(
-        'already_added'.tr,
-        'file_already_added'.tr,
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.showInfo('file_already_added'.tr);
       // Open immediately
       openFile(libraryItems[existingIdx]);
       return;
@@ -702,17 +683,7 @@ class HomeController extends GetxController {
   void toggleFavoriteTool(String toolId) {
     final wasAdded = _storageService.toggleFavoriteTool(toolId);
     if (!wasAdded && !favoriteTools.contains(toolId) && favoriteTools.length >= 6) {
-      Get.snackbar(
-        'الحد الأقصى للاختصارات',
-        'تم الوصول للحد الأقصى (6 اختصارات). يمكنك إزالة اختصار لإضافة غيره.',
-        backgroundColor: const Color(0xFF1E293B),
-        colorText: Colors.white,
-        icon: const Icon(Icons.info_outline_rounded, color: Colors.amberAccent),
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(16),
-        borderRadius: 12,
-        duration: const Duration(seconds: 3),
-      );
+      AppToast.showWarning('تم الوصول للحد الأقصى (6 اختصارات)');
     }
     favoriteTools.assignAll(_storageService.getFavoriteTools());
   }
@@ -839,20 +810,9 @@ class HomeController extends GetxController {
         });
 
         if (result == 'NO_APP') {
-          Get.snackbar(
-            'تعذر فتح الملف',
-            'no_app_for_file'.tr,
-            backgroundColor: const Color(0xFF1E293B),
-            colorText: Colors.white,
-            duration: const Duration(seconds: 4),
-          );
+          AppToast.showWarning('no_app_for_file'.tr);
         } else if (result == 'FILE_NOT_FOUND') {
-          Get.snackbar(
-            'error'.tr,
-            'الملف غير موجود / File not found',
-            backgroundColor: Colors.red.shade800,
-            colorText: Colors.white,
-          );
+          AppToast.showError('الملف غير موجود / File not found');
         }
         return;
       } catch (_) {}
@@ -861,23 +821,12 @@ class HomeController extends GetxController {
     try {
       final result = await OpenFilex.open(item.path, type: mimeType == '*/*' ? null : mimeType);
       if (result.type == ResultType.noAppToOpen) {
-        Get.snackbar(
-          'تعذر فتح الملف',
-          'no_app_for_file'.tr,
-          backgroundColor: const Color(0xFF1E293B),
-          colorText: Colors.white,
-          duration: const Duration(seconds: 4),
-        );
+        AppToast.showWarning('no_app_for_file'.tr);
       } else if (result.type == ResultType.fileNotFound) {
-        Get.snackbar(
-          'error'.tr,
-          'الملف غير موجود / File not found',
-          backgroundColor: Colors.red.shade800,
-          colorText: Colors.white,
-        );
+        AppToast.showError('الملف غير موجود / File not found');
       }
     } catch (e) {
-      Get.snackbar('error'.tr, 'حدث خطأ: $e', backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError('حدث خطأ: $e');
     }
   }
 

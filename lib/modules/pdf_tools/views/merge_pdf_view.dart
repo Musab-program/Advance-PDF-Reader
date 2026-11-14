@@ -3,12 +3,21 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
+import '../../../core/utils/app_toast.dart';
 import '../services/pdf_tools_service.dart';
+import '../widgets/tool_empty_view.dart';
 import '../widgets/tool_result_sheet.dart';
 
 class MergePdfView extends StatefulWidget {
-  const MergePdfView({super.key});
+  final String? initialFilePath;
+  final List<String>? initialFilePaths;
+
+  const MergePdfView({
+    super.key,
+    this.initialFilePath,
+    this.initialFilePaths,
+  });
 
   @override
   State<MergePdfView> createState() => _MergePdfViewState();
@@ -34,6 +43,55 @@ class _MergePdfViewState extends State<MergePdfView> {
   bool _isProcessing = false;
   double _progress = 0.0;
   String _progressStatus = '';
+  bool _isLoadingInitial = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final hasPaths = (widget.initialFilePaths != null && widget.initialFilePaths!.isNotEmpty) ||
+        widget.initialFilePath != null;
+    if (hasPaths) {
+      _isLoadingInitial = true;
+      final future = (widget.initialFilePaths != null && widget.initialFilePaths!.isNotEmpty)
+          ? _loadInitialFiles(widget.initialFilePaths!)
+          : _loadInitialFile(widget.initialFilePath!);
+      future.whenComplete(() {
+        if (mounted) setState(() => _isLoadingInitial = false);
+      });
+    }
+  }
+
+  Future<void> _loadInitialFiles(List<String> paths) async {
+    for (final path in paths) {
+      final file = File(path);
+      if (!await file.exists()) continue;
+      int size = 0;
+      int? pCount;
+      try {
+        size = await file.length();
+        final rxDoc = await pdfrx.PdfDocument.openFile(path);
+        pCount = rxDoc.pages.length;
+        await rxDoc.dispose();
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _items.add(_MergePdfItem(
+            path: path,
+            name: p.basename(path),
+            size: size,
+            pageCount: pCount,
+          ));
+          if (_nameController.text.trim().isEmpty) {
+            _nameController.text = '${p.basenameWithoutExtension(path)}_merged';
+          }
+        });
+      }
+    }
+  }
+
+  Future<void> _loadInitialFile(String path) async {
+    await _loadInitialFiles([path]);
+  }
 
   @override
   void dispose() {
@@ -63,10 +121,9 @@ class _MergePdfViewState extends State<MergePdfView> {
             int? pCount;
             try {
               size = await file.length();
-              final bytes = await file.readAsBytes();
-              final doc = PdfDocument(inputBytes: bytes);
-              pCount = doc.pages.count;
-              doc.dispose();
+              final rxDoc = await pdfrx.PdfDocument.openFile(path);
+              pCount = rxDoc.pages.length;
+              await rxDoc.dispose();
             } catch (_) {}
 
             _items.add(_MergePdfItem(
@@ -77,21 +134,25 @@ class _MergePdfViewState extends State<MergePdfView> {
             ));
           }
         }
+        if (_nameController.text.trim().isEmpty && _items.isNotEmpty) {
+          _nameController.text = '${p.basenameWithoutExtension(_items.first.path)}_merged';
+        }
         setState(() {});
       }
     } catch (e) {
-      Get.snackbar('error'.tr, e.toString(), backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError(e.toString());
     }
   }
 
   Future<void> _startMerge() async {
     if (_items.length < 2) {
-      Get.snackbar(
-        'error'.tr,
-        'يرجى اختيار ملفين على الأقل للدمج / Please select at least 2 files',
-        backgroundColor: Colors.orange.shade800,
-        colorText: Colors.white,
-      );
+      AppToast.showWarning('يرجى اختيار ملفين على الأقل للدمج');
+      return;
+    }
+
+    final customName = _nameController.text.trim();
+    if (customName.isEmpty) {
+      AppToast.showWarning('يرجى إدخال اسم الملف الناتج قبل المتابعة');
       return;
     }
 
@@ -102,11 +163,10 @@ class _MergePdfViewState extends State<MergePdfView> {
     });
 
     final inputPaths = _items.map((e) => e.path).toList();
-    final customName = _nameController.text.trim();
 
     final result = await PdfToolsService().mergePdfs(
       inputPaths,
-      outputFileName: customName.isNotEmpty ? customName : null,
+      outputFileName: customName,
       onProgress: (prog, status) {
         setState(() {
           _progress = prog;
@@ -126,13 +186,7 @@ class _MergePdfViewState extends State<MergePdfView> {
         title: 'tool_merge_pdf'.tr,
       );
     } else {
-      Get.snackbar(
-        'error'.tr,
-        result.errorMessage ?? 'فشلت عملية الدمج',
-        backgroundColor: Colors.red.shade800,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      AppToast.showError(result.errorMessage ?? 'فشلت عملية الدمج');
     }
   }
 
@@ -164,7 +218,7 @@ class _MergePdfViewState extends State<MergePdfView> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
+                            color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
                           ),
                         ),
                       ),
@@ -182,39 +236,34 @@ class _MergePdfViewState extends State<MergePdfView> {
                     ],
                   ),
                 ),
-              if (_items.isEmpty)
+              if (_isLoadingInitial)
                 Expanded(
                   child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.merge_type_rounded, size: 64, color: primaryColor.withOpacity(0.4)),
-                          const SizedBox(height: 16),
-                          Text(
-                            'desc_merge_pdf'.tr,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
-                            ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: primaryColor),
+                        const SizedBox(height: 16),
+                        Text(
+                          'opening_file'.tr,
+                          style: TextStyle(
+                            color: theme.textTheme.bodyMedium?.color ?? Colors.grey,
+                            fontSize: 14,
                           ),
-                          const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: primaryColor,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                            ),
-                            icon: const Icon(Icons.picture_as_pdf_rounded),
-                            label: const Text('اختر ملفات PDF'),
-                            onPressed: _pickFiles,
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
+                  ),
+                )
+              else if (_items.isEmpty)
+                Expanded(
+                  child: ToolEmptyView(
+                    imagePath: 'assets/vector/merge_pdf.png',
+                    title: 'tool_merge_pdf'.tr,
+                    description: 'دمج عدة ملفات PDF في مستند واحد مرتب حسب رغبتك بسهولة وسرعة.',
+                    actionLabel: 'اختر ملفات PDF',
+                    actionIcon: Icons.picture_as_pdf_rounded,
+                    onAction: _pickFiles,
                   ),
                 )
               else ...[
@@ -222,7 +271,7 @@ class _MergePdfViewState extends State<MergePdfView> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Text(
                     'اسحب المقبض ≡ لإعادة ترتيب الملفات قبل الدمج',
-                    style: TextStyle(fontSize: 11, color: theme.textTheme.bodySmall?.color?.withOpacity(0.6)),
+                    style: TextStyle(fontSize: 11, color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6)),
                   ),
                 ),
                 Expanded(
@@ -245,13 +294,13 @@ class _MergePdfViewState extends State<MergePdfView> {
                           color: cardBg,
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withOpacity(0.3),
+                            color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3),
                           ),
                         ),
                         child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                           leading: CircleAvatar(
-                            backgroundColor: primaryColor.withOpacity(0.12),
+                            backgroundColor: primaryColor.withValues(alpha: 0.12),
                             child: Text(
                               '${index + 1}',
                               style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold, fontSize: 13),
@@ -267,7 +316,7 @@ class _MergePdfViewState extends State<MergePdfView> {
                             '${_formatSize(item.size)}${item.pageCount != null ? ' • ${item.pageCount} صفحة' : ''}',
                             style: TextStyle(
                               fontSize: 11,
-                              color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                              color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                             ),
                           ),
                           trailing: Row(
@@ -305,7 +354,7 @@ class _MergePdfViewState extends State<MergePdfView> {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(isDark ? 0.35 : 0.08),
+                        color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
                         blurRadius: 15,
                         offset: const Offset(0, 4),
                       ),
@@ -317,7 +366,8 @@ class _MergePdfViewState extends State<MergePdfView> {
                       TextField(
                         controller: _nameController,
                         decoration: InputDecoration(
-                          hintText: 'اسم الملف الناتج (اختياري)',
+                          labelText: 'اسم الملف الناتج',
+                          hintText: 'مثال: AuraPDF_merged',
                           hintStyle: const TextStyle(fontSize: 12),
                           isDense: true,
                           prefixIcon: const Icon(Icons.edit_outlined, size: 18),
@@ -325,7 +375,7 @@ class _MergePdfViewState extends State<MergePdfView> {
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.3)),
+                            borderSide: BorderSide(color: theme.dividerColor.withValues(alpha: 0.3)),
                           ),
                         ),
                       ),

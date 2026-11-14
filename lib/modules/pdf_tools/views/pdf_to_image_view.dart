@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
+import '../../../core/utils/app_toast.dart';
 import '../services/pdf_tools_service.dart';
+import '../widgets/tool_empty_view.dart';
 import '../widgets/tool_result_sheet.dart';
 
 enum ExportScope { all, single, range }
@@ -28,6 +30,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
   int _singlePage = 1;
   final TextEditingController _fromPageController = TextEditingController(text: '1');
   final TextEditingController _toPageController = TextEditingController();
+  final TextEditingController _outputNameController = TextEditingController();
 
   String _format = 'png'; // 'png' or 'jpg'
   int _quality = 85; // For JPG
@@ -37,12 +40,16 @@ class _PdfToImageViewState extends State<PdfToImageView> {
   bool _isProcessing = false;
   double _progress = 0.0;
   String _progressStatus = '';
+  bool _isLoadingInitial = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.initialFilePath != null) {
-      _loadFile(widget.initialFilePath!);
+      _isLoadingInitial = true;
+      _loadFile(widget.initialFilePath!).whenComplete(() {
+        if (mounted) setState(() => _isLoadingInitial = false);
+      });
     }
   }
 
@@ -50,6 +57,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
   void dispose() {
     _fromPageController.dispose();
     _toPageController.dispose();
+    _outputNameController.dispose();
     super.dispose();
   }
 
@@ -70,7 +78,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
         await _loadFile(result.files.single.path!);
       }
     } catch (e) {
-      Get.snackbar('error'.tr, e.toString(), backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError(e.toString());
     }
   }
 
@@ -80,10 +88,9 @@ class _PdfToImageViewState extends State<PdfToImageView> {
 
     try {
       final size = await file.length();
-      final bytes = await file.readAsBytes();
-      final doc = PdfDocument(inputBytes: bytes);
-      final count = doc.pages.count;
-      doc.dispose();
+      final rxDoc = await pdfrx.PdfDocument.openFile(path);
+      final count = rxDoc.pages.length;
+      await rxDoc.dispose();
 
       setState(() {
         _filePath = path;
@@ -93,9 +100,10 @@ class _PdfToImageViewState extends State<PdfToImageView> {
         _singlePage = 1;
         _fromPageController.text = '1';
         _toPageController.text = count > 10 ? '10' : '$count';
+        _outputNameController.text = '${p.basenameWithoutExtension(path)}_images';
       });
     } catch (e) {
-      Get.snackbar('error'.tr, 'تعذر فتح الملف / Failed to read PDF: $e', backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError('تعذر فتح الملف: $e');
     }
   }
 
@@ -120,9 +128,15 @@ class _PdfToImageViewState extends State<PdfToImageView> {
   Future<void> _startExport() async {
     if (_filePath == null) return;
 
+    final outputName = _outputNameController.text.trim();
+    if (outputName.isEmpty) {
+      AppToast.showWarning('يرجى إدخال اسم المجلد/الصور الناتجة أولاً');
+      return;
+    }
+
     final targetPages = _computePagesToExport();
     if (targetPages.isEmpty) {
-      Get.snackbar('تنبيه', 'يرجى تحديد صفحة واحدة على الأقل للتصدير', backgroundColor: Colors.orange.shade800, colorText: Colors.white);
+      AppToast.showWarning('يرجى تحديد صفحة واحدة على الأقل للتصدير');
       return;
     }
 
@@ -139,6 +153,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
       jpgQuality: _quality,
       scale: _scale,
       asLongPicture: _exportAsLongPicture,
+      outputName: outputName,
       onProgress: (prog, status) {
         setState(() {
           _progress = prog;
@@ -158,13 +173,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
         title: 'tool_pdf_to_img'.tr,
       );
     } else {
-      Get.snackbar(
-        'error'.tr,
-        res.errorMessage ?? 'فشلت عملية التصدير',
-        backgroundColor: Colors.red.shade800,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      AppToast.showError(res.errorMessage ?? 'فشلت عملية التصدير');
     }
   }
 
@@ -183,38 +192,31 @@ class _PdfToImageViewState extends State<PdfToImageView> {
       ),
       body: Stack(
         children: [
-          if (_filePath == null)
+          if (_isLoadingInitial)
             Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.photo_library_rounded, size: 64, color: primaryColor.withValues(alpha: 0.5)),
-                    const SizedBox(height: 16),
-                    Text(
-                      'desc_pdf_to_img'.tr,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
-                      ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: primaryColor),
+                  const SizedBox(height: 16),
+                  Text(
+                    'opening_file'.tr,
+                    style: TextStyle(
+                      color: theme.textTheme.bodyMedium?.color ?? Colors.grey,
+                      fontSize: 14,
                     ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      icon: const Icon(Icons.picture_as_pdf_rounded),
-                      label: const Text('اختر مستند PDF لتحويله لصور'),
-                      onPressed: _pickFile,
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+            )
+          else if (_filePath == null)
+            ToolEmptyView(
+              imagePath: 'assets/vector/pdf_to_photos.png',
+              title: 'tool_pdf_to_img'.tr,
+              description: 'استخراج وتصدير جميع صفحات مستند الـ PDF كصور عالية الدقة وبصيغ متعددة.',
+              actionLabel: 'اختر مستند PDF',
+              actionIcon: Icons.picture_as_pdf_rounded,
+              onAction: _pickFile,
             )
           else
             SingleChildScrollView(
@@ -228,7 +230,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withOpacity(0.3)),
+                      border: Border.all(color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
@@ -236,7 +238,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: primaryColor.withOpacity(0.12),
+                            color: primaryColor.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Icon(Icons.picture_as_pdf_rounded, color: primaryColor),
@@ -252,11 +254,12 @@ class _PdfToImageViewState extends State<PdfToImageView> {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                               ),
+                              const SizedBox(height: 4),
                               Text(
                                 '$_totalPages صفحات • ${_formatSize(_fileSize)}',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                                  color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                                 ),
                               ),
                             ],
@@ -269,147 +272,179 @@ class _PdfToImageViewState extends State<PdfToImageView> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
 
-                  // Scope selection
-                  Text(
-                    'نطاق الصفحات للتصدير',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: theme.textTheme.bodyMedium?.color),
+                  // Output name card (Mandatory)
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: TextField(
+                      controller: _outputNameController,
+                      decoration: InputDecoration(
+                        labelText: 'اسم مجلد وبادئة الصور الناتجة',
+                        hintText: 'مثال: document_images',
+                        hintStyle: const TextStyle(fontSize: 12),
+                        isDense: true,
+                        prefixIcon: const Icon(Icons.edit_note_rounded, size: 20),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: theme.dividerColor.withValues(alpha: 0.3)),
+                        ),
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 16),
+
+                  // WPS-style Stitch option
                   Container(
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                      border: Border.all(
+                        color: _exportAsLongPicture
+                            ? primaryColor
+                            : (isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3)),
+                        width: _exportAsLongPicture ? 1.5 : 1,
+                      ),
                     ),
-                    child: Column(
-                      children: [
-                        RadioListTile<ExportScope>(
-                          value: ExportScope.all,
-                          groupValue: _scope,
-                          activeColor: primaryColor,
-                          title: Text('كامل صفحات المستند ($_totalPages صفحة)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          onChanged: (val) => setState(() => _scope = val!),
+                    child: SwitchListTile(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      value: _exportAsLongPicture,
+                      onChanged: (val) => setState(() => _exportAsLongPicture = val),
+                      secondary: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: (_exportAsLongPicture ? primaryColor : Colors.grey).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        const Divider(height: 1),
-                        RadioListTile<ExportScope>(
-                          value: ExportScope.range,
-                          groupValue: _scope,
-                          activeColor: primaryColor,
-                          title: const Text('نطاق صفحات محدد', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          subtitle: const Text('تصدير جزء من الصفحات', style: TextStyle(fontSize: 11)),
-                          onChanged: (val) => setState(() => _scope = val!),
+                        child: Icon(
+                          Icons.view_day_rounded,
+                          color: _exportAsLongPicture ? primaryColor : Colors.grey,
                         ),
-                        const Divider(height: 1),
-                        RadioListTile<ExportScope>(
-                          value: ExportScope.single,
-                          groupValue: _scope,
-                          activeColor: primaryColor,
-                          title: const Text('صفحة واحدة فقط', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          onChanged: (val) => setState(() => _scope = val!),
-                        ),
-                      ],
+                      ),
+                      title: const Text('تصدير كصورة واحدة طويلة (دمج رأسي)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      subtitle: const Text('دمج كل الصفحات المختارة في صورة شريطية واحدة متصلة', style: TextStyle(fontSize: 11)),
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
-                  if (_scope == ExportScope.range)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: cardBg,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _fromPageController,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                labelText: 'من صفحة',
-                                hintText: '1',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: TextField(
-                              controller: _toPageController,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                labelText: 'إلى صفحة',
-                                hintText: '$_totalPages',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  if (_scope == ExportScope.single)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: cardBg,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Text('رقم الصفحة:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                          const SizedBox(width: 16),
-                          IconButton(
-                            icon: const Icon(Icons.remove_circle_outline_rounded),
-                            onPressed: _singlePage > 1 ? () => setState(() => _singlePage--) : null,
-                          ),
-                          Text('$_singlePage', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          IconButton(
-                            icon: const Icon(Icons.add_circle_outline_rounded),
-                            onPressed: _singlePage < _totalPages ? () => setState(() => _singlePage++) : null,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  const SizedBox(height: 20),
-                  // Image Format & Resolution
-                  Text(
-                    'إعدادات الصورة والتنسيق',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: theme.textTheme.bodyMedium?.color),
-                  ),
-                  const SizedBox(height: 10),
+                  // Scope selector
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                      border: Border.all(color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        const Text('الصفحات المراد تصديرها:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 10),
                         Wrap(
-                          alignment: WrapAlignment.spaceBetween,
-                          crossAxisAlignment: WrapCrossAlignment.center,
                           spacing: 8,
-                          runSpacing: 8,
                           children: [
-                            const Text('صيغة الإخراج:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                            Wrap(
-                              spacing: 8,
+                            ChoiceChip(
+                              label: Text('جميع الصفحات ($_totalPages)'),
+                              selected: _scope == ExportScope.all,
+                              onSelected: (val) => setState(() => _scope = ExportScope.all),
+                            ),
+                            ChoiceChip(
+                              label: const Text('صفحة واحدة'),
+                              selected: _scope == ExportScope.single,
+                              onSelected: (val) => setState(() => _scope = ExportScope.single),
+                            ),
+                            ChoiceChip(
+                              label: const Text('نطاق صفحات'),
+                              selected: _scope == ExportScope.range,
+                              onSelected: (val) => setState(() => _scope = ExportScope.range),
+                            ),
+                          ],
+                        ),
+                        if (_scope == ExportScope.single) ...[
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              const Text('رقم الصفحة: ', style: TextStyle(fontSize: 12)),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle_outline),
+                                onPressed: _singlePage > 1 ? () => setState(() => _singlePage--) : null,
+                              ),
+                              Text('$_singlePage', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                              IconButton(
+                                icon: const Icon(Icons.add_circle_outline),
+                                onPressed: _singlePage < _totalPages ? () => setState(() => _singlePage++) : null,
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (_scope == ExportScope.range) ...[
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _fromPageController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'من صفحة',
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextField(
+                                  controller: _toPageController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'إلى صفحة',
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Quality & format card
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('صيغة الصور:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                            Row(
                               children: [
                                 ChoiceChip(
-                                  label: const Text('PNG (بدون فقدان)'),
+                                  label: const Text('PNG (أعلى نقاء)'),
                                   selected: _format == 'png',
                                   onSelected: (val) => setState(() => _format = 'png'),
                                 ),
+                                const SizedBox(width: 8),
                                 ChoiceChip(
-                                  label: const Text('JPG (مضغوط)'),
+                                  label: const Text('JPG (حجم أقل)'),
                                   selected: _format == 'jpg',
                                   onSelected: (val) => setState(() => _format = 'jpg'),
                                 ),
@@ -417,33 +452,7 @@ class _PdfToImageViewState extends State<PdfToImageView> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        Wrap(
-                          alignment: WrapAlignment.spaceBetween,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            const Text('طريقة الحفظ:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                            Wrap(
-                              spacing: 8,
-                              children: [
-                                ChoiceChip(
-                                  label: const Text('صور منفصلة'),
-                                  selected: !_exportAsLongPicture,
-                                  onSelected: (val) => setState(() => _exportAsLongPicture = false),
-                                ),
-                                ChoiceChip(
-                                  avatar: const Icon(Icons.auto_awesome, size: 14),
-                                  label: const Text('صورة طولية مدمجة'),
-                                  selected: _exportAsLongPicture,
-                                  onSelected: (val) => setState(() => _exportAsLongPicture = true),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
                         Wrap(
                           alignment: WrapAlignment.spaceBetween,
                           crossAxisAlignment: WrapCrossAlignment.center,

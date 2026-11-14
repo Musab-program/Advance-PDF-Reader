@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:pdf_reader/modules/office_viewer/controllers/office_viewer_controller.dart';
 import 'package:pdf_reader/modules/office_viewer/services/xlsx_parser.dart';
@@ -365,12 +366,7 @@ class OfficeViewerView extends GetView<OfficeViewerController> {
                     tooltip: 'نسخ محتوى الخلية',
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: cellContent));
-                      Get.snackbar(
-                        'تم النسخ',
-                        'تم نسخ محتوى الخلية ($cellRef)',
-                        snackPosition: SnackPosition.BOTTOM,
-                        duration: const Duration(seconds: 2),
-                      );
+                      AppToast.showSuccess('تم نسخ محتوى الخلية ($cellRef)');
                     },
                   ),
               ],

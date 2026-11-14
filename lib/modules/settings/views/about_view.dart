@@ -1,8 +1,10 @@
 // lib/modules/settings/views/about_view.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:pdf_reader/modules/settings/controllers/settings_controller.dart';
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
 
 class AboutView extends GetView<SettingsController> {
   const AboutView({super.key});
@@ -87,13 +89,7 @@ class AboutView extends GetView<SettingsController> {
                   iconColor: const Color(0xFF3B82F6), // Bright blue
                   title: 'Update',
                   onTap: () {
-                    Get.snackbar(
-                      'App Update',
-                      'You are using the latest version of Aura PDF.',
-                      snackPosition: SnackPosition.BOTTOM,
-                      backgroundColor: cardBg,
-                      colorText: textPrimaryColor,
-                    );
+                    AppToast.showInfo('أنت تستخدم أحدث إصدار من التطبيق');
                   },
                 ),
                 _buildDivider(borderCol),
@@ -177,74 +173,56 @@ class AboutView extends GetView<SettingsController> {
   }
 
   void _showPrivacyPolicy(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
     final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-    final primaryColor = Theme.of(context).primaryColor;
 
-    Get.dialog(
-      AlertDialog(
-        backgroundColor: cardBg,
-        title: Text(
-          'privacy_policy'.tr,
-          style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.bold),
-        ),
-        content: SizedBox(
-          width: 450,
-          child: SingleChildScrollView(
-            child: Text(
-              'privacy_policy_text'.tr,
-              style: TextStyle(color: textSecondaryColor, fontSize: 13, height: 1.5),
-            ),
+    LuxuryDialog.show(
+      context,
+      icon: Icons.privacy_tip_rounded,
+      title: 'privacy_policy'.tr,
+      maxWidth: 420,
+      body: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: SingleChildScrollView(
+          child: Text(
+            'privacy_policy_text'.tr,
+            textAlign: TextAlign.start,
+            style: TextStyle(color: textSecondaryColor, fontSize: 13, height: 1.6),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: Text('close'.tr, style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
-          ),
-        ],
       ),
+      primaryButtonText: 'close'.tr,
+      primaryButtonIcon: Icons.check_rounded,
     );
   }
 
   void _showLicenses(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
     final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-    final primaryColor = Theme.of(context).primaryColor;
 
-    Get.dialog(
-      AlertDialog(
-        backgroundColor: cardBg,
-        title: Text(
-          'Open-source Licenses',
-          style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.bold),
-        ),
-        content: SizedBox(
-          width: 450,
-          child: SingleChildScrollView(
-            child: Text(
-              'Aura PDF is built using Flutter and the following open-source libraries:\n\n'
-              '- GetX: MIT License\n'
-              '- Syncfusion Flutter PDF: Syncfusion License\n'
-              '- Path Provider: BSD 3-Clause License\n'
-              '- Permission Handler: MIT License\n'
-              '- Share Plus: BSD 3-Clause License\n'
-              '- Open Filex: MIT License\n'
-              '- Get Storage: MIT License\n\n'
-              'Special thanks to the open-source community for making this application possible.',
-              style: TextStyle(color: textSecondaryColor, fontSize: 13, height: 1.5),
-            ),
+    LuxuryDialog.show(
+      context,
+      icon: Icons.verified_rounded,
+      title: 'Open-source Licenses',
+      maxWidth: 420,
+      body: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: SingleChildScrollView(
+          child: Text(
+            'Aura PDF is built using Flutter and the following open-source libraries:\n\n'
+            '- GetX: MIT License\n'
+            '- Syncfusion Flutter PDF: Syncfusion License\n'
+            '- Path Provider: BSD 3-Clause License\n'
+            '- Permission Handler: MIT License\n'
+            '- Share Plus: BSD 3-Clause License\n'
+            '- Open Filex: MIT License\n'
+            '- Get Storage: MIT License\n\n'
+            'Special thanks to the open-source community for making this application possible.',
+            textAlign: TextAlign.start,
+            style: TextStyle(color: textSecondaryColor, fontSize: 13, height: 1.6),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: Text('close'.tr, style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
-          ),
-        ],
       ),
+      primaryButtonText: 'close'.tr,
+      primaryButtonIcon: Icons.check_rounded,
     );
   }
 }

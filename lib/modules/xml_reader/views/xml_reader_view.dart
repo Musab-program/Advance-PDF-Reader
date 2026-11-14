@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:xml/xml.dart';
 import 'package:pdf_reader/modules/xml_reader/controllers/xml_reader_controller.dart';
 
@@ -37,12 +38,7 @@ class XmlReaderView extends GetView<XmlReaderController> {
                   ? controller.rawContent.value
                   : controller.formattedContent.value;
               Clipboard.setData(ClipboardData(text: text));
-              Get.snackbar(
-                'copied_to_clipboard'.tr,
-                controller.fileName.value,
-                snackPosition: SnackPosition.BOTTOM,
-                duration: const Duration(seconds: 2),
-              );
+              AppToast.showSuccess('copied_to_clipboard'.tr);
             },
             tooltip: 'Copy',
           ),

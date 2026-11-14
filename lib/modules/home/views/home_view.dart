@@ -1,11 +1,14 @@
 // lib/modules/home/views/home_view.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/domain/entities/library_item.dart';
 import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
+import 'package:flutter_zoom_drawer/flutter_zoom_drawer.dart';
 import 'package:pdf_reader/modules/home/widgets/main_drawer.dart';
 import 'package:pdf_reader/modules/home/widgets/selection_details_sheet.dart';
+import 'package:pdf_reader/modules/home/widgets/selection_tools_sheet.dart';
 import 'package:pdf_reader/routes/app_routes.dart';
 import 'package:pdf_reader/modules/background_remover/views/remove_background_view.dart';
 import 'package:pdf_reader/modules/pdf_tools/views/merge_pdf_view.dart';
@@ -13,6 +16,8 @@ import 'package:pdf_reader/modules/pdf_tools/views/split_pdf_view.dart';
 import 'package:pdf_reader/modules/pdf_tools/views/organize_pdf_view.dart';
 import 'package:pdf_reader/modules/pdf_tools/views/image_to_pdf_view.dart';
 import 'package:pdf_reader/modules/pdf_tools/views/pdf_to_image_view.dart';
+import 'package:pdf_reader/modules/document_editor/views/document_editor_view.dart';
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
 
 
 class HomeView extends GetView<HomeController> {
@@ -32,19 +37,43 @@ class HomeView extends GetView<HomeController> {
       }
     });
 
-    return Obx(() => PopScope(
-      canPop: !controller.isSelectionMode.value,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        if (controller.isSelectionMode.value) {
-          controller.clearSelection();
-        }
-      },
-      child: Scaffold(
-        key: scaffoldKey,
-        drawer: const MainDrawer(),
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        body: SafeArea(
+    return Obx(() {
+      final isRtl = Directionality.of(context) == TextDirection.rtl;
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      final menuBg = isDark ? const Color(0xFF0B0F19) : const Color(0xFFF1F5F9);
+      final shadowBg = isDark ? const Color(0xFF1E1B4B) : const Color(0xFFC7D2FE);
+      final screenWidth = MediaQuery.sizeOf(context).width;
+
+      return ZoomDrawer(
+        controller: controller.zoomDrawerController,
+        menuScreen: const MainDrawer(),
+        borderRadius: 28.0,
+        showShadow: true,
+        angle: 0.0,
+        slideWidth: screenWidth * 0.74,
+        menuBackgroundColor: menuBg,
+        drawerShadowsBackgroundColor: shadowBg,
+        isRtl: isRtl,
+        mainScreenTapClose: true,
+        menuScreenTapClose: false,
+        duration: const Duration(milliseconds: 300),
+        mainScreen: PopScope(
+          canPop: !controller.isSelectionMode.value && (controller.zoomDrawerController.isOpen?.call() != true),
+          onPopInvokedWithResult: (didPop, result) {
+            if (didPop) return;
+            if (controller.zoomDrawerController.isOpen?.call() == true) {
+              controller.zoomDrawerController.close?.call();
+              return;
+            }
+            if (controller.isSelectionMode.value) {
+              controller.clearSelection();
+              return;
+            }
+          },
+          child: Scaffold(
+            key: scaffoldKey,
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            body: SafeArea(
           child: Center(
             child: Container(
               constraints: const BoxConstraints(maxWidth: 1000),
@@ -203,7 +232,9 @@ class HomeView extends GetView<HomeController> {
           return const SizedBox.shrink();
         }),
       ),
-    ));
+    ),
+  );
+});
   }
 
   Widget _buildFilesTab(BuildContext context) {
@@ -263,6 +294,14 @@ class HomeView extends GetView<HomeController> {
   List<Map<String, dynamic>> _getToolsList(BuildContext context) {
     return [
       {
+        'id': 'document_editor',
+        'title': 'tool_document_editor'.tr,
+        'desc': 'desc_document_editor'.tr,
+        'icon': Icons.edit_note_rounded,
+        'isAvailable': true,
+        'action': () => Get.to(() => const DocumentEditorView()),
+      },
+      {
         'id': 'remove_bg',
         'title': 'remove_background'.tr,
         'desc': 'desc_remove_bg'.tr,
@@ -316,7 +355,12 @@ class HomeView extends GetView<HomeController> {
         'desc': 'compress_pdf_desc'.tr,
         'icon': Icons.compress_rounded,
         'isAvailable': false,
-        'action': () => _showComingSoonDialog(context, 'tool_compress_pdf'.tr),
+        'action': () => _showComingSoonToolDialog(
+          context,
+          id: 'compress_pdf',
+          title: 'tool_compress_pdf'.tr,
+          icon: Icons.compress_rounded,
+        ),
       },
       {
         'id': 'protect_pdf',
@@ -324,7 +368,12 @@ class HomeView extends GetView<HomeController> {
         'desc': 'tool_coming_soon'.tr,
         'icon': Icons.lock_outline_rounded,
         'isAvailable': false,
-        'action': () => _showComingSoonDialog(context, 'tool_protect_pdf'.tr),
+        'action': () => _showComingSoonToolDialog(
+          context,
+          id: 'protect_pdf',
+          title: 'tool_protect_pdf'.tr,
+          icon: Icons.lock_outline_rounded,
+        ),
       },
       {
         'id': 'watermark',
@@ -332,7 +381,12 @@ class HomeView extends GetView<HomeController> {
         'desc': 'add_rotated_watermark_desc'.tr,
         'icon': Icons.branding_watermark_rounded,
         'isAvailable': false,
-        'action': () => _showComingSoonDialog(context, 'tool_watermark'.tr),
+        'action': () => _showComingSoonToolDialog(
+          context,
+          id: 'watermark',
+          title: 'tool_watermark'.tr,
+          icon: Icons.branding_watermark_rounded,
+        ),
       },
       {
         'id': 'extract_text',
@@ -340,7 +394,12 @@ class HomeView extends GetView<HomeController> {
         'desc': 'desc_extract_text'.tr,
         'icon': Icons.text_fields_rounded,
         'isAvailable': false,
-        'action': () => _showComingSoonDialog(context, 'tool_extract_text'.tr),
+        'action': () => _showComingSoonToolDialog(
+          context,
+          id: 'extract_text',
+          title: 'tool_extract_text'.tr,
+          icon: Icons.text_fields_rounded,
+        ),
       },
     ];
   }
@@ -384,6 +443,10 @@ class HomeView extends GetView<HomeController> {
           child: InkWell(
             borderRadius: BorderRadius.circular(18),
             onTap: onTap,
+            onLongPress: () {
+              HapticFeedback.mediumImpact();
+              _showToolGuideDialog(context, tool);
+            },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               decoration: BoxDecoration(
@@ -681,30 +744,326 @@ class HomeView extends GetView<HomeController> {
     );
   }
 
-  void _showComingSoonDialog(BuildContext context, String toolName) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            const Icon(Icons.info_outline_rounded, color: Colors.blueAccent),
-            const SizedBox(width: 8),
-            Text(toolName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Text(
-          'coming_soon_dialog_desc'.tr,
-          style: const TextStyle(fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('got_it'.tr),
-          ),
-        ],
-      ),
+  void _showToolGuideDialog(BuildContext context, Map<String, dynamic> tool) {
+    final isAr = Get.locale?.languageCode != 'en';
+    final id = tool['id'] as String? ?? '';
+    final title = tool['title'] as String? ?? '';
+    final icon = tool['icon'] as IconData? ?? Icons.auto_awesome_rounded;
+    final isAvailable = tool['isAvailable'] as bool? ?? false;
+    final VoidCallback? onTap = tool['action'] as VoidCallback?;
+
+    if (!isAvailable) {
+      _showComingSoonToolDialog(context, id: id, title: title, icon: icon);
+      return;
+    }
+
+    final guide = _buildToolGuideData(id, isAr);
+
+    LuxuryDialog.show(
+      context,
+      icon: icon,
+      title: title,
+      badgeText: isAr ? 'متوفرة الآن • جاهزة للاستخدام' : 'Available • Ready to Use',
+      badgeIcon: Icons.check_circle_rounded,
+      message: guide.summary,
+      highlightsTitle: isAr ? 'كيف تستخدم الأداة:' : 'How to use:',
+      highlights: guide.steps,
+      secondaryButtonText: 'close'.tr,
+      primaryButtonText: isAr ? 'فتح الأداة الآن' : 'Open Tool',
+      primaryButtonIcon: Icons.arrow_forward_rounded,
+      onPrimaryPressed: () => onTap?.call(),
     );
+  }
+
+  void _showComingSoonToolDialog(
+    BuildContext context, {
+    required String id,
+    required String title,
+    required IconData icon,
+  }) {
+    final isAr = Get.locale?.languageCode != 'en';
+    final guide = _buildToolGuideData(id, isAr);
+
+    LuxuryDialog.show(
+      context,
+      title: title,
+      badgeText: '${'tool_coming_soon_badge'.tr} • ${'coming_soon_title'.tr}',
+      badgeIcon: Icons.schedule_rounded,
+      icon: icon,
+      message: guide.summary,
+      highlightsTitle: isAr ? 'ما الذي ستقدمه الأداة؟' : 'Upcoming capabilities:',
+      highlights: guide.steps,
+      primaryButtonText: 'got_it'.tr,
+      primaryButtonIcon: Icons.check_rounded,
+    );
+  }
+
+  ({String summary, List<LuxuryDialogHighlight> steps}) _buildToolGuideData(
+    String id,
+    bool isAr,
+  ) {
+    switch (id) {
+      case 'document_editor':
+        return (
+          summary: isAr
+              ? 'مساحة متكاملة للتعديل على ملفات PDF بالتوقيع، الرسم، التعليق، وتعبئة النصوص.'
+              : 'All-in-one PDF workspace to annotate, draw, sign, and fill documents.',
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.looks_one_rounded,
+              text: isAr
+                  ? 'افتح الأداة واختر ملف PDF من جهازك أو عبر الضغط المطوّل من المكتبة.'
+                  : 'Open the tool and pick a PDF file, or launch from long-press options.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_two_rounded,
+              text: isAr
+                  ? 'تنقّل بين التبويبات لاستخدام القلم، التظليل، التوقيع اليدوي، النص المنسق، أو التغطية.'
+                  : 'Use the toolbar tabs for pen, highlighter, signature, text boxes, or whiteout.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_3_rounded,
+              text: isAr
+                  ? 'احفظ تعديلاتك كنسخة جديدة منفصلة أو استبدل الملف الأصلي مباشرة.'
+                  : 'Save your changes as a new copy or overwrite the original file directly.',
+            ),
+          ],
+        );
+      case 'remove_bg':
+        return (
+          summary: isAr
+              ? 'أداة ذكية لعزل خلفية الصور بدقة مع خيارات معاينة وتعديل يدوي بالفرشاة.'
+              : 'Smart background removal with instant preview modes and manual brush refinement.',
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.looks_one_rounded,
+              text: isAr
+                  ? 'اختر صورة من المعرض ليتم عزل خلفيتها تلقائيًا (يتطلب اتصالًا بالإنترنت).'
+                  : 'Pick an image from your gallery for automatic AI background removal (requires internet).',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_two_rounded,
+              text: isAr
+                  ? 'بدّل خلفية المعاينة أو افتح محرر الفرشاة اليدوي لضبط أي تفاصيل دقيقة.'
+                  : 'Switch preview backgrounds or refine fine edges manually with the brush editor.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_3_rounded,
+              text: isAr
+                  ? 'احفظ النتيجة بصيغة PNG شفافة في المعرض أو شاركها مباشرة.'
+                  : 'Save the transparent PNG directly to your gallery or share it immediately.',
+            ),
+          ],
+        );
+      case 'merge_pdf':
+        return (
+          summary: isAr
+              ? 'دمج عدة ملفات PDF في مستند واحد متكامل بالترتيب الذي تختاره.'
+              : 'Combine multiple PDF documents into one organized file in any order.',
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.looks_one_rounded,
+              text: isAr
+                  ? 'اضغط زر اختيار الملفات وحدد ملفين PDF أو أكثر من جهازك.'
+                  : 'Select two or more PDF files from your device.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_two_rounded,
+              text: isAr
+                  ? 'اسحب البطاقات لإعادة ترتيب الملفات كما تريد ظهور صفحاتها.'
+                  : 'Drag and reorder the files to set your preferred page sequence.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_3_rounded,
+              text: isAr
+                  ? 'اكتب اسم الملف الناتج واضغط دمج لحفظ المستند وفتحه فورًا.'
+                  : 'Enter the output name and tap Merge to generate and open the new PDF.',
+            ),
+          ],
+        );
+      case 'split_pdf':
+        return (
+          summary: isAr
+              ? 'تقسيم ملف PDF إلى ملفات متعددة أو استخراج نطاق صفحات محدد بسهولة.'
+              : 'Split a PDF into separate files or extract exact page ranges effortlessly.',
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.looks_one_rounded,
+              text: isAr
+                  ? 'اختر ملف PDF المراد تقسيمه لعرض عدد صفحاته الإجمالي.'
+                  : 'Pick a PDF file to view its total page count.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_two_rounded,
+              text: isAr
+                  ? 'حدد طريقة التقسيم: نطاق صفحات، فصل كل صفحة، أو نطاقات مخصصة مثل 1-3, 5.'
+                  : 'Choose range extraction, split every page, or custom ranges like 1-3, 5.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_3_rounded,
+              text: isAr
+                  ? 'أدخل اسم المخرج واضغط تقسيم لإنشاء الملفات الجديدة.'
+                  : 'Specify the output folder/name and run the split operation.',
+            ),
+          ],
+        );
+      case 'organize_pdf':
+        return (
+          summary: isAr
+              ? 'التحكم الكامل بصفحات المستند: إعادة الترتيب، التدوير، الحذف، والاستخراج.'
+              : 'Full control over PDF pages: reorder, rotate, delete, or extract selected pages.',
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.looks_one_rounded,
+              text: isAr
+                  ? 'اختر ملف PDF لتظهر جميع صفحاته بشكل شبكة معاينة واضحة.'
+                  : 'Load a PDF file to display all its pages in an interactive thumbnail grid.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_two_rounded,
+              text: isAr
+                  ? 'استخدم الأسهم لتحريك الصفحات، زر التدوير 90°، أو أيقونة الحذف لأي صفحة.'
+                  : 'Use arrows to reorder pages, tap rotate 90°, or remove unwanted pages.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_3_rounded,
+              text: isAr
+                  ? 'احفظ المستند المنظّم بالكامل أو حدد صفحات معينة لاستخراجها بملف مستقل.'
+                  : 'Export the full organized PDF or extract only selected pages to a new file.',
+            ),
+          ],
+        );
+      case 'img_to_pdf':
+        return (
+          summary: isAr
+              ? 'تحويل مجموعة من الصور إلى ملف PDF واحد مرتب بجودة عالية.'
+              : 'Convert multiple gallery images into a single clean PDF document.',
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.looks_one_rounded,
+              text: isAr
+                  ? 'اختر الصور التي تريد جمعها من المعرض.'
+                  : 'Select the images you want to combine from your gallery.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_two_rounded,
+              text: isAr
+                  ? 'رتّب تسلسل الصور بالسحب من المقبض واحذف أي صورة لا تحتاجها.'
+                  : 'Drag images via the handle to set page order or remove extras.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_3_rounded,
+              text: isAr
+                  ? 'حدد اسم الملف الناتج واضغط تحويل لإنشاء الـ PDF.'
+                  : 'Name the output document and convert it into a ready PDF file.',
+            ),
+          ],
+        );
+      case 'pdf_to_img':
+        return (
+          summary: isAr
+              ? 'تحويل صفحات الـ PDF إلى صور واضحة منفصلة أو صورة واحدة طويلة متصلة.'
+              : 'Export PDF pages as sharp individual images or a single stitched long picture.',
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.looks_one_rounded,
+              text: isAr
+                  ? 'اختر ملف PDF وأدخل اسم المجلد وبادئة الصور الناتجة.'
+                  : 'Pick a PDF file and enter the target folder and image prefix.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_two_rounded,
+              text: isAr
+                  ? 'اختر الصفحات المطلوبة أو فعّل خيار التصدير كصورة واحدة طويلة رأسيًا.'
+                  : 'Select pages or enable stitching them vertically into one long image.',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.looks_3_rounded,
+              text: isAr
+                  ? 'ابدأ التحويل لمعاينة الصور وحفظها أو مشاركتها مباشرة.'
+                  : 'Start conversion to save, view, or share the generated images.',
+            ),
+          ],
+        );
+      case 'compress_pdf':
+        return (
+          summary: 'coming_soon_dialog_desc'.tr,
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.speed_rounded,
+              text: isAr
+                  ? 'تقليص حجم ملف الـ PDF مع الحفاظ على وضوح النصوص والصور'
+                  : 'Reduce PDF file size while keeping text and images sharp',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.tune_rounded,
+              text: isAr
+                  ? 'اختيار مستوى الضغط المناسب (قوي، متوازن، أو خفيف)'
+                  : 'Choose between strong, balanced, or light compression levels',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.verified_user_rounded,
+              text: isAr
+                  ? 'معالجة محلية سريعة تحفظ خصوصية مستنداتك بالكامل'
+                  : 'Fast on-device processing that keeps your documents private',
+            ),
+          ],
+        );
+      case 'protect_pdf':
+        return (
+          summary: 'coming_soon_dialog_desc'.tr,
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.lock_rounded,
+              text: isAr
+                  ? 'حماية ملفات الـ PDF بكلمة مرور قوية لمنع الفتح غير المصرح'
+                  : 'Lock sensitive PDF files with a strong password against unauthorized access',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.key_rounded,
+              text: isAr
+                  ? 'فك تشفير المستندات المحمية عند معرفة كلمة المرور بسهولة'
+                  : 'Easily unlock protected documents when you know the password',
+            ),
+          ],
+        );
+      case 'watermark':
+        return (
+          summary: 'coming_soon_dialog_desc'.tr,
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.branding_watermark_rounded,
+              text: isAr
+                  ? 'إضافة علامة مائية نصية أو شعار مخصص على كل صفحات المستند بشكل دائم'
+                  : 'Stamp persistent custom text or logo watermarks onto every PDF page',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.opacity_rounded,
+              text: isAr
+                  ? 'التحكم بزاوية الميلان، الشفافية، والحجم قبل الحفظ النهائي'
+                  : 'Customize rotation angle, opacity, and size before exporting',
+            ),
+          ],
+        );
+      default:
+        return (
+          summary: 'coming_soon_dialog_desc'.tr,
+          steps: [
+            LuxuryDialogHighlight(
+              icon: Icons.text_fields_rounded,
+              text: isAr
+                  ? 'استخراج النصوص من صفحات المستند كاملة وحفظها أو نسخها بسهولة'
+                  : 'Extract readable text across document pages for quick copy or export',
+            ),
+            LuxuryDialogHighlight(
+              icon: Icons.offline_bolt_rounded,
+              text: isAr
+                  ? 'ستتوفر الأداة مجانًا بالكامل في التحديث القادم للتطبيق'
+                  : 'Available completely free in an upcoming update',
+            ),
+          ],
+        );
+    }
   }
 
   Widget _buildFavoritesTab(BuildContext context) {
@@ -1106,7 +1465,7 @@ class HomeView extends GetView<HomeController> {
         children: [
           IconButton(
             icon: Icon(Icons.menu_rounded, color: textSecondaryColor),
-            onPressed: () => key.currentState?.openDrawer(),
+            onPressed: () => controller.zoomDrawerController.toggle?.call(),
           ),
           Expanded(
             child: GestureDetector(
@@ -1279,6 +1638,32 @@ class HomeView extends GetView<HomeController> {
                   ),
                   
                   VerticalDivider(color: borderCol.withOpacity(0.6), width: 1, indent: 10, endIndent: 10),
+
+                  // Open with Tools
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => showSelectionToolsSheet(
+                        context,
+                        controller.selectedPaths.toList(),
+                        onActionTaken: () => controller.clearSelection(),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.handyman_rounded, color: primaryColor, size: 20),
+                          const SizedBox(height: 2),
+                          Text(
+                            'open_with_tools'.tr,
+                            style: TextStyle(color: primaryColor, fontSize: 10, fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  
+                  VerticalDivider(color: borderCol.withOpacity(0.6), width: 1, indent: 10, endIndent: 10),
                   
                   // Delete
                   Expanded(
@@ -1306,233 +1691,38 @@ class HomeView extends GetView<HomeController> {
     );
   }
 
-  void _confirmBulkDelete(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
+  void _confirmRemoveDialog(
+    BuildContext context, {
+    required IconData icon,
+    required VoidCallback onConfirm,
+  }) {
+    LuxuryDialog.show(
+      context,
+      compact: true,
+      accentColor: Colors.redAccent,
+      icon: icon,
+      title: 'remove_title'.tr,
+      message: 'remove_desc'.tr,
+      secondaryButtonText: 'cancel'.tr,
+      primaryButtonText: 'remove_title'.tr,
+      primaryButtonIcon: Icons.delete_outline_rounded,
+      onPrimaryPressed: onConfirm,
+    );
+  }
 
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.delete_sweep_rounded,
-                  color: Colors.redAccent,
-                  size: 36,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'remove_title'.tr,
-                style: TextStyle(
-                  color: textPrimaryColor,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'remove_desc'.tr,
-                style: TextStyle(
-                  color: textSecondaryColor,
-                  fontSize: 14,
-                  height: 1.4,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        side: BorderSide(
-                          color: Theme.of(context).dividerColor.withOpacity(0.3),
-                        ),
-                      ),
-                      onPressed: () => Get.back(),
-                      child: Text(
-                        'cancel'.tr,
-                        style: TextStyle(
-                          color: textSecondaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: () {
-                        controller.deleteSelected();
-                        Get.back();
-                      },
-                      child: Text(
-                        'remove_title'.tr,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+  void _confirmBulkDelete(BuildContext context) {
+    _confirmRemoveDialog(
+      context,
+      icon: Icons.delete_sweep_rounded,
+      onConfirm: controller.deleteSelected,
     );
   }
 
   void _confirmDelete(BuildContext context, LibraryItem item) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.delete_forever_rounded,
-                  color: Colors.redAccent,
-                  size: 36,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'remove_title'.tr,
-                style: TextStyle(
-                  color: textPrimaryColor,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'remove_desc'.tr,
-                style: TextStyle(
-                  color: textSecondaryColor,
-                  fontSize: 14,
-                  height: 1.4,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        side: BorderSide(
-                          color: Theme.of(context).dividerColor.withOpacity(0.3),
-                        ),
-                      ),
-                      onPressed: () => Get.back(),
-                      child: Text(
-                        'cancel'.tr,
-                        style: TextStyle(
-                          color: textSecondaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: () {
-                        controller.removeItem(item);
-                        Get.back();
-                      },
-                      child: Text(
-                        'remove_title'.tr,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+    _confirmRemoveDialog(
+      context,
+      icon: Icons.delete_forever_rounded,
+      onConfirm: () => controller.removeItem(item),
     );
   }
 

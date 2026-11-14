@@ -54,7 +54,8 @@ void showSelectionDetailsSheet(BuildContext context, List<String> selectedPaths)
         } catch (_) {}
       }
     } else if (isDir) {
-      singleSize = '---';
+      totalSize = FileUtils.getDirectorySizeBytesSync(path);
+      singleSize = FileUtils.formatSize(totalSize);
       try {
         final mod = Directory(path).statSync().modified;
         singleDate = '${mod.year}-${mod.month.toString().padLeft(2, '0')}-${mod.day.toString().padLeft(2, '0')} '
@@ -67,6 +68,7 @@ void showSelectionDetailsSheet(BuildContext context, List<String> selectedPaths)
     for (final path in selectedPaths) {
       if (Directory(path).existsSync()) {
         totalFolders++;
+        totalSize += FileUtils.getDirectorySizeBytesSync(path);
       } else {
         totalFiles++;
         final file = File(path);

@@ -1,11 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:get/get_utils/src/extensions/internacionalization.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import '../../../core/utils/app_toast.dart';
 import '../services/pdf_tools_service.dart';
+import '../widgets/tool_empty_view.dart';
 import '../widgets/tool_result_sheet.dart';
 
 class _OrganizePageItem {
@@ -34,21 +35,27 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
   pdfrx.PdfDocument? _rxDocument;
   List<_OrganizePageItem> _pages = [];
   final Set<int> _selectedOriginalIndices = {}; // set of originalZeroIndex
+  final TextEditingController _outputNameController = TextEditingController();
 
   bool _isProcessing = false;
   double _progress = 0.0;
   String _progressStatus = '';
+  bool _isLoadingInitial = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.initialFilePath != null) {
-      _loadFile(widget.initialFilePath!);
+      _isLoadingInitial = true;
+      _loadFile(widget.initialFilePath!).whenComplete(() {
+        if (mounted) setState(() => _isLoadingInitial = false);
+      });
     }
   }
 
   @override
   void dispose() {
+    _outputNameController.dispose();
     _rxDocument?.dispose();
     super.dispose();
   }
@@ -64,7 +71,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
         await _loadFile(result.files.single.path!);
       }
     } catch (e) {
-      Get.snackbar('error'.tr, e.toString(), backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError(e.toString());
     }
   }
 
@@ -73,16 +80,13 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
     if (!await file.exists()) return;
 
     try {
-      final bytes = await file.readAsBytes();
-      final doc = PdfDocument(inputBytes: bytes);
-      final count = doc.pages.count;
-      doc.dispose();
-
       final rxDoc = await pdfrx.PdfDocument.openFile(path);
+      final count = rxDoc.pages.length;
 
       setState(() {
         _filePath = path;
         _fileName = p.basename(path);
+        _outputNameController.text = '${p.basenameWithoutExtension(path)}_organized';
         _rxDocument?.dispose();
         _rxDocument = rxDoc;
         _selectedOriginalIndices.clear();
@@ -95,7 +99,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
         );
       });
     } catch (e) {
-      Get.snackbar('error'.tr, 'تعذر فتح الملف / Failed to read PDF: $e', backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError('تعذر فتح الملف: $e');
     }
   }
 
@@ -107,21 +111,21 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
     });
   }
 
-  void _rotateSelectedPages() {
+  void _rotateSelectedPages({bool clockwise = true}) {
     if (_selectedOriginalIndices.isEmpty) return;
     setState(() {
       for (final p in _pages) {
         if (_selectedOriginalIndices.contains(p.originalZeroIndex)) {
-          p.rotationTurns = (p.rotationTurns + 1) % 4;
+          p.rotationTurns = (p.rotationTurns + (clockwise ? 1 : 3)) % 4;
         }
       }
     });
-    Get.snackbar('تم', 'تم تدوير الصفحات المحددة 90 درجة', snackPosition: SnackPosition.BOTTOM, duration: const Duration(seconds: 2));
+    AppToast.showSuccess(clockwise ? 'تم تدوير الصفحات المحددة 90° لليمين' : 'تم تدوير الصفحات المحددة 90° لليسار');
   }
 
-  void _rotatePage(int index) {
+  void _rotatePage(int index, {bool clockwise = true}) {
     setState(() {
-      _pages[index].rotationTurns = (_pages[index].rotationTurns + 1) % 4;
+      _pages[index].rotationTurns = (_pages[index].rotationTurns + (clockwise ? 1 : 3)) % 4;
     });
   }
 
@@ -131,7 +135,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
       _pages.removeWhere((item) => _selectedOriginalIndices.contains(item.originalZeroIndex));
       _selectedOriginalIndices.clear();
     });
-    Get.snackbar('تم', 'تم حذف الصفحات المحددة من القائمة', snackPosition: SnackPosition.BOTTOM, duration: const Duration(seconds: 2));
+    AppToast.showSuccess('تم حذف الصفحات المحددة');
   }
 
   void _selectAll() {
@@ -150,7 +154,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
     final List<_OrganizePageItem> targetItems;
     if (extractSelectedOnly) {
       if (_selectedOriginalIndices.isEmpty) {
-        Get.snackbar('تنبيه', 'يرجى تحديد صفحة واحدة على الأقل للاستخراج', backgroundColor: Colors.orange.shade800, colorText: Colors.white);
+        AppToast.showWarning('يرجى تحديد صفحة واحدة على الأقل للاستخراج');
         return;
       }
       targetItems = _pages
@@ -158,7 +162,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
           .toList();
     } else {
       if (_pages.isEmpty) {
-        Get.snackbar('تنبيه', 'المستند فارغ، يرجى الإبقاء على صفحة واحدة على الأقل', backgroundColor: Colors.orange.shade800, colorText: Colors.white);
+        AppToast.showWarning('المستند فارغ، يرجى الإبقاء على صفحة واحدة على الأقل');
         return;
       }
       targetItems = List.from(_pages);
@@ -172,10 +176,11 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
       }
     }
 
-    final origBase = p.basenameWithoutExtension(_filePath!);
-    final outputName = extractSelectedOnly
-        ? '${origBase}_extracted_${targetIndices.length}pages'
-        : '${origBase}_organized';
+    final outputName = _outputNameController.text.trim();
+    if (outputName.isEmpty) {
+      AppToast.showWarning('يرجى إدخال اسم الملف الناتج قبل الحفظ');
+      return;
+    }
 
     setState(() {
       _isProcessing = true;
@@ -207,12 +212,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
         title: extractSelectedOnly ? 'استخراج الصفحات' : 'تنظيم الصفحات',
       );
     } else {
-      Get.snackbar(
-        'error'.tr,
-        res.errorMessage ?? 'فشلت العملية',
-        backgroundColor: Colors.red.shade800,
-        colorText: Colors.white,
-      );
+      AppToast.showError(res.errorMessage ?? 'فشلت العملية');
     }
   }
 
@@ -222,6 +222,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
     final isDark = theme.brightness == Brightness.dark;
     final cardBg = theme.cardColor;
     final primaryColor = theme.primaryColor;
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
 
     return Scaffold(
       appBar: AppBar(
@@ -236,7 +237,7 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.normal,
-                  color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+                  color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
                 ),
               ),
           ],
@@ -248,44 +249,37 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
             IconButton(
               icon: const Icon(Icons.folder_open_rounded),
               tooltip: 'تغيير الملف',
-              onPressed: _pickFile,
+              onPressed: _isProcessing ? null : _pickFile,
             ),
         ],
       ),
       body: Stack(
         children: [
-          if (_filePath == null)
+          if (_isLoadingInitial)
             Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.auto_stories_rounded, size: 64, color: primaryColor.withOpacity(0.5)),
-                    const SizedBox(height: 16),
-                    Text(
-                      'أعد ترتيب الصفحات، أو احذف ما لا تحتاجه، أو استخرج صفحات معينة في ملف PDF جديد دون المساس بالمستند الأصلي.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
-                      ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: primaryColor),
+                  const SizedBox(height: 16),
+                  Text(
+                    'opening_file'.tr,
+                    style: TextStyle(
+                      color: theme.textTheme.bodyMedium?.color ?? Colors.grey,
+                      fontSize: 14,
                     ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      icon: const Icon(Icons.picture_as_pdf_rounded),
-                      label: const Text('اختر مستند PDF لتنظيمه'),
-                      onPressed: _pickFile,
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+            )
+          else if (_filePath == null)
+            ToolEmptyView(
+              imagePath: 'assets/vector/organize_pdf.png',
+              title: 'تنظيم صفحات PDF',
+              description: 'أعد ترتيب الصفحات، أو احذف ما لا تحتاجه، أو استخرج صفحات معينة في ملف PDF جديد بكل سهولة.',
+              actionLabel: 'اختر مستند PDF لتنظيمه',
+              actionIcon: Icons.picture_as_pdf_rounded,
+              onAction: _pickFile,
             )
           else
             Column(
@@ -295,56 +289,59 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: cardBg,
-                    border: Border(bottom: BorderSide(color: theme.dividerColor.withOpacity(0.2))),
+                    border: Border(bottom: BorderSide(color: theme.dividerColor.withValues(alpha: 0.2))),
                   ),
                   child: Row(
                     children: [
-                      Text(
-                        'الصفحات (${_pages.length})',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                      const Spacer(),
                       TextButton.icon(
-                        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                        onPressed: _selectAll,
                         icon: Icon(
-                          _selectedOriginalIndices.length == _pages.length
-                              ? Icons.check_box_rounded
-                              : Icons.check_box_outline_blank_rounded,
+                          _selectedOriginalIndices.length == _pages.length ? Icons.check_box : Icons.check_box_outline_blank,
                           size: 18,
                         ),
-                        label: Text(
-                          _selectedOriginalIndices.length == _pages.length ? 'إلغاء التحديد' : 'تحديد الكل',
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        onPressed: _selectAll,
+                        label: Text(_selectedOriginalIndices.length == _pages.length ? 'إلغاء التحديد' : 'تحديد الكل (${_pages.length})'),
+                        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                       ),
+                      const Spacer(),
                       if (_selectedOriginalIndices.isNotEmpty) ...[
-                        const SizedBox(width: 6),
                         IconButton(
-                          icon: const Icon(Icons.rotate_right_rounded, size: 20),
-                          tooltip: 'تدوير الصفحات المحددة 90°',
-                          onPressed: _rotateSelectedPages,
+                          icon: const Icon(Icons.rotate_left_rounded),
+                          tooltip: 'تدوير الصفحات المحددة 90° لليسار',
+                          color: primaryColor,
+                          onPressed: () => _rotateSelectedPages(clockwise: false),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                          icon: const Icon(Icons.rotate_right_rounded),
+                          tooltip: 'تدوير الصفحات المحددة 90° لليمين',
+                          color: primaryColor,
+                          onPressed: () => _rotateSelectedPages(clockwise: true),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded),
                           tooltip: 'حذف الصفحات المحددة',
+                          color: Colors.redAccent,
                           onPressed: _deleteSelectedPages,
                         ),
                       ],
                     ],
                   ),
                 ),
-                // Pages Grid
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    'استخدم الأسهم ◄ ► لتغيير مكان الصفحة في المستند',
+                    style: TextStyle(fontSize: 11, color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6)),
+                  ),
+                ),
+                // Grid of pages
                 Expanded(
                   child: GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: MediaQuery.of(context).size.width > 750
-                          ? 4
-                          : (MediaQuery.of(context).size.width > 500 ? 3 : 2),
-                      crossAxisSpacing: 14,
-                      mainAxisSpacing: 14,
-                      childAspectRatio: 0.68,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 0.72,
                     ),
                     itemCount: _pages.length,
                     itemBuilder: (context, index) {
@@ -354,41 +351,22 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
                       return Container(
                         decoration: BoxDecoration(
                           color: cardBg,
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: isSelected ? primaryColor : (isDark ? const Color(0xFF22304D) : theme.dividerColor.withOpacity(0.3)),
-                            width: isSelected ? 2.0 : 1.0,
+                            color: isSelected
+                                ? primaryColor
+                                : (isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3)),
+                            width: isSelected ? 2.5 : 1,
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
-                              blurRadius: 6,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
                         ),
-                        clipBehavior: Clip.antiAlias,
                         child: Column(
                           children: [
-                            // Header badge with original page number & checkbox
-                            Container(
-                              color: isSelected ? primaryColor.withOpacity(0.12) : theme.scaffoldBackgroundColor,
+                            // Page header inside card
+                            Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: primaryColor,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      '#${index + 1} (ص ${item.originalPageNumber})',
-                                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  GestureDetector(
+                                  InkWell(
                                     onTap: () {
                                       setState(() {
                                         if (isSelected) {
@@ -400,48 +378,91 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
                                     },
                                     child: Icon(
                                       isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                                      size: 18,
+                                      size: 20,
                                       color: isSelected ? primaryColor : Colors.grey,
                                     ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'ص ${index + 1}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: isSelected ? primaryColor : null,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    icon: const Icon(Icons.rotate_right_rounded, size: 18),
+                                    tooltip: 'تدوير 90°',
+                                    onPressed: () => _rotatePage(index),
                                   ),
                                 ],
                               ),
                             ),
-                            // Thumbnail via pdfrx.PdfPageView
+                            // Page thumbnail
                             Expanded(
-                              child: _rxDocument != null
-                                  ? Container(
-                                      padding: const EdgeInsets.all(4),
-                                      color: Colors.white,
-                                      child: RotatedBox(
-                                        quarterTurns: item.rotationTurns,
-                                        child: pdfrx.PdfPageView(
-                                          document: _rxDocument,
-                                          pageNumber: item.originalPageNumber,
-                                          maximumDpi: 100,
+                              child: Padding(
+                                padding: const EdgeInsets.all(4.0),
+                                child: Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: RotatedBox(
+                                          quarterTurns: item.rotationTurns,
+                                          child: _rxDocument != null
+                                              ? pdfrx.PdfPageView(
+                                                  document: _rxDocument!,
+                                                  pageNumber: item.originalPageNumber,
+                                                )
+                                              : const Center(child: CircularProgressIndicator()),
                                         ),
                                       ),
-                                    )
-                                  : const Center(child: CircularProgressIndicator()),
+                                    ),
+                                    if (item.rotationTurns != 0)
+                                      Positioned(
+                                        top: 4,
+                                        left: 4,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(alpha: 0.72),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(
+                                            '${item.rotationTurns * 90}°',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                             ),
-                            // Move left/right, rotate, and delete actions
+                            // Position controls
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                              color: theme.scaffoldBackgroundColor,
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              decoration: BoxDecoration(
+                                color: (isDark ? Colors.black26 : Colors.grey.shade100),
+                                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(13)),
+                              ),
                               child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                 children: [
                                   IconButton(
                                     visualDensity: VisualDensity.compact,
-                                    icon: const Icon(Icons.arrow_back_rounded, size: 16),
-                                    tooltip: 'تقديم للأمام',
+                                    icon: Icon(
+                                      isRtl ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
+                                      size: 20,
+                                    ),
+                                    tooltip: 'تحريك للسابق (ص $index)',
                                     onPressed: index > 0 ? () => _movePage(index, index - 1) : null,
-                                  ),
-                                  IconButton(
-                                    visualDensity: VisualDensity.compact,
-                                    icon: const Icon(Icons.rotate_right_rounded, size: 16),
-                                    tooltip: 'تدوير 90°',
-                                    onPressed: () => _rotatePage(index),
                                   ),
                                   IconButton(
                                     visualDensity: VisualDensity.compact,
@@ -456,8 +477,11 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
                                   ),
                                   IconButton(
                                     visualDensity: VisualDensity.compact,
-                                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                                    tooltip: 'تأخير للخلف',
+                                    icon: Icon(
+                                      isRtl ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
+                                      size: 20,
+                                    ),
+                                    tooltip: 'تحريك للتالي (ص ${index + 2})',
                                     onPressed: index < _pages.length - 1 ? () => _movePage(index, index + 1) : null,
                                   ),
                                 ],
@@ -485,54 +509,76 @@ class _OrganizePdfViewState extends State<OrganizePdfView> {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(isDark ? 0.35 : 0.08),
+                        color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
                         blurRadius: 15,
                         offset: const Offset(0, 4),
                       ),
                     ],
                   ),
-                  child: Row(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (_selectedOriginalIndices.isNotEmpty) ...[
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.teal.shade700,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            icon: const Icon(Icons.file_download_outlined, size: 18),
-                            label: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                'استخراج ${_selectedOriginalIndices.length} صفحات',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      TextField(
+                        controller: _outputNameController,
+                        decoration: InputDecoration(
+                          labelText: 'اسم الملف الناتج',
+                          hintText: 'مثال: document_organized',
+                          hintStyle: const TextStyle(fontSize: 12),
+                          isDense: true,
+                          prefixIcon: const Icon(Icons.edit_outlined, size: 18),
+                          suffixText: '.pdf',
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: theme.dividerColor.withValues(alpha: 0.3)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          if (_selectedOriginalIndices.isNotEmpty) ...[
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal.shade700,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                icon: const Icon(Icons.file_download_outlined, size: 18),
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    'استخراج ${_selectedOriginalIndices.length} صفحات',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                  ),
+                                ),
+                                onPressed: () => _saveOrganized(extractSelectedOnly: true),
                               ),
                             ),
-                            onPressed: () => _saveOrganized(extractSelectedOnly: true),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primaryColor,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          icon: const Icon(Icons.save_rounded, size: 18),
-                          label: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              'حفظ الترتيب (${_pages.length})',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: primaryColor,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              icon: const Icon(Icons.save_rounded, size: 18),
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  'حفظ الترتيب (${_pages.length})',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                              ),
+                              onPressed: () => _saveOrganized(extractSelectedOnly: false),
                             ),
                           ),
-                          onPressed: () => _saveOrganized(extractSelectedOnly: false),
-                        ),
+                        ],
                       ),
                     ],
                   ),

@@ -1,10 +1,13 @@
 // lib/modules/search/views/search_view.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:pdf_reader/core/utils/app_toast.dart';
 import 'package:get/get.dart';
 import 'package:pdf_reader/core/utils/file_utils.dart';
 import 'package:pdf_reader/domain/entities/library_item.dart';
 import 'package:pdf_reader/modules/home/controllers/home_controller.dart';
 import 'package:pdf_reader/modules/search/controllers/search_controller.dart' as sc;
+import 'package:pdf_reader/core/widgets/luxury_dialog.dart';
 
 class SearchView extends GetView<sc.SearchController> {
   const SearchView({super.key});
@@ -42,7 +45,8 @@ class SearchView extends GetView<sc.SearchController> {
               Expanded(
                 child: TextField(
                   controller: controller.textController,
-                  autofocus: true,
+                  focusNode: controller.searchFocusNode,
+                  autofocus: false,
                   style: TextStyle(color: textPrimaryColor, fontSize: 14),
                   decoration: InputDecoration(
                     hintText: 'search_hint'.tr,
@@ -84,7 +88,8 @@ class SearchView extends GetView<sc.SearchController> {
                         activeValue: controller.selectedDateFilter,
                         icon: Icons.calendar_today_rounded,
                         onTap: () {
-                          FocusScope.of(context).unfocus();
+                          controller.searchFocusNode.unfocus();
+                          controller.searchFocusNode.canRequestFocus = false;
                           _showDateFilterSheet(context);
                         },
                       ),
@@ -97,7 +102,8 @@ class SearchView extends GetView<sc.SearchController> {
                         activeValue: controller.selectedTypeFilter,
                         icon: Icons.category_rounded,
                         onTap: () {
-                          FocusScope.of(context).unfocus();
+                          controller.searchFocusNode.unfocus();
+                          controller.searchFocusNode.canRequestFocus = false;
                           _showTypeFilterSheet(context);
                         },
                       ),
@@ -110,7 +116,8 @@ class SearchView extends GetView<sc.SearchController> {
                         activeValue: controller.selectedSizeFilter,
                         icon: Icons.data_usage_rounded,
                         onTap: () {
-                          FocusScope.of(context).unfocus();
+                          controller.searchFocusNode.unfocus();
+                          controller.searchFocusNode.canRequestFocus = false;
                           _showSizeFilterSheet(context);
                         },
                       ),
@@ -314,108 +321,102 @@ class SearchView extends GetView<sc.SearchController> {
     final primaryColor = Theme.of(context).primaryColor;
 
     Get.bottomSheet(
-      Align(
-        alignment: Alignment.bottomCenter,
-        child: Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 550),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, -4),
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Get.back(),
+        child: GestureDetector(
+          onTap: () {},
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxWidth: 550),
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
               ),
-            ],
-          ),
-          padding: EdgeInsets.only(
-            top: 14,
-            bottom: MediaQuery.of(context).padding.bottom + 12,
-            left: 16,
-            right: 16,
-          ),
-          child: SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              child: Obx(() => Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Center(
-                    child: Text(
-                      'sort_date'.tr,
-                      style: TextStyle(
-                        color: textPrimaryColor,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ...[
-                    {'key': 'all', 'label': 'all_dates'.tr},
-                    {'key': '1_day', 'label': '1_day_desc'.tr},
-                    {'key': '2_days', 'label': '2_days_desc'.tr},
-                    {'key': '1_week', 'label': '1_week_desc'.tr},
-                    {'key': '2_weeks', 'label': '2_weeks_desc'.tr},
-                    {'key': 'custom', 'label': 'custom'.tr},
-                  ].map((opt) {
-                    final isSelected = controller.selectedDateFilter.value == opt['key'];
-                    return ListTile(
-                      title: Text(
-                        opt['label']!,
-                        style: TextStyle(
-                          color: textPrimaryColor,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              padding: EdgeInsets.only(
+                top: 14,
+                bottom: MediaQuery.of(context).padding.bottom + 12,
+                left: 16,
+                right: 16,
+              ),
+              child: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  child: Obx(() => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       ),
-                      trailing: isSelected ? Icon(Icons.check_circle_rounded, color: primaryColor) : null,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      onTap: () async {
-                        if (opt['key'] == 'custom') {
-                          Get.back();
-                          final now = DateTime.now();
-                          final picked = await showDateRangePicker(
-                            context: context,
-                            firstDate: DateTime(2000),
-                            lastDate: now.add(const Duration(days: 1)),
-                            initialDateRange: controller.customDateRange.value ??
-                                DateTimeRange(
-                                  start: now.subtract(const Duration(days: 7)),
-                                  end: now,
-                                ),
-                            builder: (context, child) {
-                              return Theme(
-                                data: Theme.of(context),
-                                child: child!,
-                              );
-                            },
-                          );
-                          if (picked != null) {
-                            controller.setCustomDate(picked);
-                          }
-                        } else {
-                          controller.setDateFilter(opt['key']!);
-                          Get.back();
-                        }
-                      },
-                    );
-                  }),
-                ],
-              )),
+                      const SizedBox(height: 14),
+                      Center(
+                        child: Text(
+                          'sort_date'.tr,
+                          style: TextStyle(
+                            color: textPrimaryColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...[
+                        {'key': 'all', 'label': 'all_dates'.tr},
+                        {'key': '1_day', 'label': '1_day_desc'.tr},
+                        {'key': '2_days', 'label': '2_days_desc'.tr},
+                        {'key': '1_week', 'label': '1_week_desc'.tr},
+                        {'key': '2_weeks', 'label': '2_weeks_desc'.tr},
+                        {'key': 'custom', 'label': 'custom'.tr},
+                      ].map((opt) {
+                        final isSelected = controller.selectedDateFilter.value == opt['key'];
+                        return ListTile(
+                          title: Text(
+                            opt['label']!,
+                            style: TextStyle(
+                              color: textPrimaryColor,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          trailing: isSelected ? Icon(Icons.check_circle_rounded, color: primaryColor) : null,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          onTap: () async {
+                            if (opt['key'] == 'custom') {
+                              controller.searchFocusNode.unfocus();
+                              controller.searchFocusNode.canRequestFocus = false;
+                              Get.back();
+                              await Future.delayed(const Duration(milliseconds: 100));
+                              if (context.mounted) {
+                                await _showCustomDateDialog(context);
+                                controller.searchFocusNode.canRequestFocus = true;
+                              }
+                            } else {
+                              controller.setDateFilter(opt['key']!);
+                              Get.back();
+                            }
+                          },
+                        );
+                      }),
+                    ],
+                  )),
+                ),
+              ),
             ),
           ),
         ),
@@ -423,7 +424,11 @@ class SearchView extends GetView<sc.SearchController> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
-    );
+      isDismissible: true,
+      enableDrag: true,
+    ).then((_) {
+      controller.searchFocusNode.canRequestFocus = true;
+    });
   }
 
   void _showTypeFilterSheet(BuildContext context) {
@@ -433,85 +438,92 @@ class SearchView extends GetView<sc.SearchController> {
     final primaryColor = Theme.of(context).primaryColor;
 
     Get.bottomSheet(
-      Align(
-        alignment: Alignment.bottomCenter,
-        child: Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 550),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, -4),
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Get.back(),
+        child: GestureDetector(
+          onTap: () {},
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxWidth: 550),
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
               ),
-            ],
-          ),
-          padding: EdgeInsets.only(
-            top: 14,
-            bottom: MediaQuery.of(context).padding.bottom + 12,
-            left: 16,
-            right: 16,
-          ),
-          child: SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              child: Obx(() => Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Center(
-                    child: Text(
-                      'sort_type'.tr,
-                      style: TextStyle(
-                        color: textPrimaryColor,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ...[
-                    {'key': 'all', 'label': 'all_formats'.tr},
-                    {'key': 'pdf', 'label': 'PDF'},
-                    {'key': 'word', 'label': 'Word'},
-                    {'key': 'excel', 'label': 'Excel'},
-                    {'key': 'ppt', 'label': 'PPT'},
-                    {'key': 'txt', 'label': 'TXT'},
-                    {'key': 'html', 'label': 'HTML'},
-                  ].map((opt) {
-                    final isSelected = controller.selectedTypeFilter.value == opt['key'];
-                    return ListTile(
-                      title: Text(
-                        opt['label']!,
-                        style: TextStyle(
-                          color: textPrimaryColor,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              padding: EdgeInsets.only(
+                top: 14,
+                bottom: MediaQuery.of(context).padding.bottom + 12,
+                left: 16,
+                right: 16,
+              ),
+              child: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  child: Obx(() => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       ),
-                      trailing: isSelected ? Icon(Icons.check_circle_rounded, color: primaryColor) : null,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      onTap: () {
-                        controller.setTypeFilter(opt['key']!);
-                        Get.back();
-                      },
-                    );
-                  }),
-                ],
-              )),
+                      const SizedBox(height: 14),
+                      Center(
+                        child: Text(
+                          'sort_type'.tr,
+                          style: TextStyle(
+                            color: textPrimaryColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...[
+                        {'key': 'all', 'label': 'all_formats'.tr},
+                        {'key': 'pdf', 'label': 'PDF'},
+                        {'key': 'word', 'label': 'Word'},
+                        {'key': 'excel', 'label': 'Excel'},
+                        {'key': 'ppt', 'label': 'PPT'},
+                        {'key': 'txt', 'label': 'TXT'},
+                        {'key': 'html', 'label': 'HTML'},
+                      ].map((opt) {
+                        final isSelected = controller.selectedTypeFilter.value == opt['key'];
+                        return ListTile(
+                          title: Text(
+                            opt['label']!,
+                            style: TextStyle(
+                              color: textPrimaryColor,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          trailing: isSelected ? Icon(Icons.check_circle_rounded, color: primaryColor) : null,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          onTap: () {
+                            controller.setTypeFilter(opt['key']!);
+                            Get.back();
+                          },
+                        );
+                      }),
+                    ],
+                  )),
+                ),
+              ),
             ),
           ),
         ),
@@ -519,7 +531,11 @@ class SearchView extends GetView<sc.SearchController> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
-    );
+      isDismissible: true,
+      enableDrag: true,
+    ).then((_) {
+      controller.searchFocusNode.canRequestFocus = true;
+    });
   }
 
   void _showSizeFilterSheet(BuildContext context) {
@@ -529,89 +545,102 @@ class SearchView extends GetView<sc.SearchController> {
     final primaryColor = Theme.of(context).primaryColor;
 
     Get.bottomSheet(
-      Align(
-        alignment: Alignment.bottomCenter,
-        child: Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 550),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, -4),
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Get.back(),
+        child: GestureDetector(
+          onTap: () {},
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxWidth: 550),
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
               ),
-            ],
-          ),
-          padding: EdgeInsets.only(
-            top: 14,
-            bottom: MediaQuery.of(context).padding.bottom + 12,
-            left: 16,
-            right: 16,
-          ),
-          child: SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              child: Obx(() => Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Center(
-                    child: Text(
-                      'sort_size'.tr,
-                      style: TextStyle(
-                        color: textPrimaryColor,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ...[
-                    {'key': 'all', 'label': 'all_sizes'.tr},
-                    {'key': 'under_1mb', 'label': 'under_1mb_desc'.tr},
-                    {'key': '1to10mb', 'label': '1to10mb_desc'.tr},
-                    {'key': '10to50mb', 'label': '10to50mb_desc'.tr},
-                    {'key': 'over_50mb', 'label': 'over_50mb_desc'.tr},
-                    {'key': 'custom', 'label': 'custom'.tr},
-                  ].map((opt) {
-                    final isSelected = controller.selectedSizeFilter.value == opt['key'];
-                    return ListTile(
-                      title: Text(
-                        opt['label']!,
-                        style: TextStyle(
-                          color: textPrimaryColor,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              padding: EdgeInsets.only(
+                top: 14,
+                bottom: MediaQuery.of(context).padding.bottom + 12,
+                left: 16,
+                right: 16,
+              ),
+              child: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  child: Obx(() => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       ),
-                      trailing: isSelected ? Icon(Icons.check_circle_rounded, color: primaryColor) : null,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      onTap: () {
-                        if (opt['key'] == 'custom') {
-                          Get.back();
-                          _showCustomSizeDialog(context);
-                        } else {
-                          controller.setSizeFilter(opt['key']!);
-                          Get.back();
-                        }
-                      },
-                    );
-                  }),
-                ],
-              )),
+                      const SizedBox(height: 14),
+                      Center(
+                        child: Text(
+                          'sort_size'.tr,
+                          style: TextStyle(
+                            color: textPrimaryColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...[
+                        {'key': 'all', 'label': 'all_sizes'.tr},
+                        {'key': 'under_1mb', 'label': 'under_1mb_desc'.tr},
+                        {'key': '1to10mb', 'label': '1to10mb_desc'.tr},
+                        {'key': '10to50mb', 'label': '10to50mb_desc'.tr},
+                        {'key': 'over_50mb', 'label': 'over_50mb_desc'.tr},
+                        {'key': 'custom', 'label': 'custom'.tr},
+                      ].map((opt) {
+                        final isSelected = controller.selectedSizeFilter.value == opt['key'];
+                        return ListTile(
+                          title: Text(
+                            opt['label']!,
+                            style: TextStyle(
+                              color: textPrimaryColor,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          trailing: isSelected ? Icon(Icons.check_circle_rounded, color: primaryColor) : null,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          onTap: () async {
+                            if (opt['key'] == 'custom') {
+                              controller.searchFocusNode.unfocus();
+                              controller.searchFocusNode.canRequestFocus = false;
+                              Get.back();
+                              await Future.delayed(const Duration(milliseconds: 100));
+                              if (context.mounted) {
+                                await _showCustomSizeDialog(context);
+                                controller.searchFocusNode.canRequestFocus = true;
+                              }
+                            } else {
+                              controller.setSizeFilter(opt['key']!);
+                              Get.back();
+                            }
+                          },
+                        );
+                      }),
+                    ],
+                  )),
+                ),
+              ),
             ),
           ),
         ),
@@ -619,14 +648,126 @@ class SearchView extends GetView<sc.SearchController> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
+      isDismissible: true,
+      enableDrag: true,
+    ).then((_) {
+      controller.searchFocusNode.canRequestFocus = true;
+    });
+  }
+
+  Future<void> _showCustomDateDialog(BuildContext context) async {
+    final theme = Theme.of(context);
+    final textPrimaryColor = theme.textTheme.bodyLarge?.color ?? Colors.black;
+    final textSecondaryColor = theme.textTheme.bodyMedium?.color ?? Colors.grey;
+
+    final now = DateTime.now();
+    final initialStart = controller.customDateRange.value?.start ?? now.subtract(const Duration(days: 7));
+    final initialEnd = controller.customDateRange.value?.end ?? now;
+
+    String formatDate(DateTime d) =>
+        '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
+
+    final startController = TextEditingController(text: formatDate(initialStart));
+    final endController = TextEditingController(text: formatDate(initialEnd));
+
+    return LuxuryDialog.showCustom(
+      context,
+      builder: (dCtx) => LuxuryDialog(
+        compact: true,
+        icon: Icons.calendar_month_rounded,
+        title: 'تحديد تاريخ مخصص',
+        message: 'أدخل التاريخ بالأرقام أو اضغط على أيقونة التقويم للاختيار المباشر.',
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: startController,
+              autofocus: false,
+              keyboardType: TextInputType.number,
+              inputFormatters: [_DateAutoSlashFormatter()],
+              style: TextStyle(color: textPrimaryColor, fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'من تاريخ (سنة/شهر/يوم)',
+                hintText: '2026/01/01',
+                hintStyle: TextStyle(color: textSecondaryColor.withValues(alpha: 0.5)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.date_range_rounded, size: 20),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: dCtx,
+                      initialDate: initialStart,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      startController.text = formatDate(picked);
+                    }
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: endController,
+              autofocus: false,
+              keyboardType: TextInputType.number,
+              inputFormatters: [_DateAutoSlashFormatter()],
+              style: TextStyle(color: textPrimaryColor, fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'إلى تاريخ (سنة/شهر/يوم)',
+                hintText: '2026/12/31',
+                hintStyle: TextStyle(color: textSecondaryColor.withValues(alpha: 0.5)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.date_range_rounded, size: 20),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: dCtx,
+                      initialDate: initialEnd,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      endController.text = formatDate(picked);
+                    }
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+        secondaryButtonText: 'cancel'.tr,
+        primaryButtonText: 'apply'.tr,
+        primaryButtonIcon: Icons.check_rounded,
+        closeOnPrimary: false,
+        onPrimaryPressed: () {
+          final startDate = _parseDateString(startController.text.trim());
+          final endDate = _parseDateString(endController.text.trim());
+          if (startDate == null || endDate == null) {
+            AppToast.showWarning('يرجى إدخال تاريخ صحيح بصيغة سنة/شهر/يوم');
+            return;
+          }
+          if (startDate.isAfter(endDate)) {
+            AppToast.showWarning('تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية');
+            return;
+          }
+          controller.setCustomDate(DateTimeRange(
+            start: startDate,
+            end: DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59),
+          ));
+          Navigator.of(dCtx).pop();
+        },
+      ),
     );
   }
 
-  void _showCustomSizeDialog(BuildContext context) {
-    final textPrimaryColor = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
-    final textSecondaryColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    final cardBg = Theme.of(context).cardColor;
-    final primaryColor = Theme.of(context).primaryColor;
+  Future<void> _showCustomSizeDialog(BuildContext context) async {
+    final theme = Theme.of(context);
+    final textPrimaryColor = theme.textTheme.bodyLarge?.color ?? Colors.black;
 
     final minController = TextEditingController(
       text: controller.customMinSizeMb.value != null
@@ -643,109 +784,127 @@ class SearchView extends GetView<sc.SearchController> {
           : '',
     );
 
-    Get.dialog(
-      Dialog(
-        backgroundColor: cardBg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 400),
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.tune_rounded, color: primaryColor, size: 22),
-                  const SizedBox(width: 8),
-                  Text(
-                    'custom_size'.tr,
-                    style: TextStyle(
-                      color: textPrimaryColor,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'size_range_hint'.tr,
-                style: TextStyle(
-                  color: textSecondaryColor,
-                  fontSize: 13,
+    return LuxuryDialog.showCustom(
+      context,
+      builder: (dCtx) => LuxuryDialog(
+        compact: true,
+        icon: Icons.tune_rounded,
+        title: 'custom_size'.tr,
+        message: 'size_range_hint'.tr,
+        body: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: minController,
+                autofocus: false,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: TextStyle(color: textPrimaryColor, fontSize: 14),
+                decoration: InputDecoration(
+                  labelText: 'min_size_mb'.tr,
+                  hintText: '0',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 ),
               ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: minController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      style: TextStyle(color: textPrimaryColor, fontSize: 14),
-                      decoration: InputDecoration(
-                        labelText: 'min_size_mb'.tr,
-                        hintText: '0',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: maxController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      style: TextStyle(color: textPrimaryColor, fontSize: 14),
-                      decoration: InputDecoration(
-                        labelText: 'max_size_mb'.tr,
-                        hintText: '50',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                      ),
-                    ),
-                  ),
-                ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: maxController,
+                autofocus: false,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: TextStyle(color: textPrimaryColor, fontSize: 14),
+                decoration: InputDecoration(
+                  labelText: 'max_size_mb'.tr,
+                  hintText: '50',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
               ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Get.back(),
-                    child: Text('cancel'.tr, style: TextStyle(color: textSecondaryColor)),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      final min = double.tryParse(minController.text.trim());
-                      final max = double.tryParse(maxController.text.trim());
-                      if (min != null || max != null) {
-                        controller.setCustomSize(min, max);
-                      }
-                      Get.back();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    ),
-                    child: Text('apply'.tr),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+        secondaryButtonText: 'cancel'.tr,
+        primaryButtonText: 'apply'.tr,
+        primaryButtonIcon: Icons.check_rounded,
+        onPrimaryPressed: () {
+          final min = double.tryParse(minController.text.trim());
+          final max = double.tryParse(maxController.text.trim());
+          if (min != null || max != null) {
+            controller.setCustomSize(min, max);
+          }
+        },
       ),
+    );
+  }
+
+  static DateTime? _parseDateString(String input) {
+    if (input.isEmpty) return null;
+    final clean = input.replaceAll('-', '/').replaceAll('.', '/');
+    final parts = clean.split('/');
+    if (parts.length != 3) return null;
+
+    int? year;
+    int? month;
+    int? day;
+
+    if (parts[0].length == 4) {
+      year = int.tryParse(parts[0]);
+      month = int.tryParse(parts[1]);
+      day = int.tryParse(parts[2]);
+    } else if (parts[2].length == 4) {
+      day = int.tryParse(parts[0]);
+      month = int.tryParse(parts[1]);
+      year = int.tryParse(parts[2]);
+    } else {
+      year = int.tryParse(parts[0]);
+      month = int.tryParse(parts[1]);
+      day = int.tryParse(parts[2]);
+    }
+
+    if (year == null || month == null || day == null) return null;
+    if (month < 1 || month > 12) return null;
+    if (day < 1 || day > 31) return null;
+
+    try {
+      return DateTime(year, month, day);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class _DateAutoSlashFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.length < oldValue.text.length) {
+      return newValue;
+    }
+
+    final digitsOnly = newValue.text.replaceAll(RegExp(r'[^\d]'), '');
+    if (digitsOnly.length > 8) {
+      return oldValue;
+    }
+
+    final buffer = StringBuffer();
+    for (int i = 0; i < digitsOnly.length; i++) {
+      if (i == 4 || i == 6) {
+        buffer.write('/');
+      }
+      buffer.write(digitsOnly[i]);
+    }
+
+    final formatted = buffer.toString();
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────
 class _SearchListCard extends StatelessWidget {
   final LibraryItem item;
   final VoidCallback onTap;

@@ -25,22 +25,24 @@ class _SplashViewState extends State<SplashView> {
     if (ExternalOfficeHandler.hasPendingOfficeFile) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final officePath = ExternalOfficeHandler.consumePendingOfficeFile();
-        Get.offAllNamed(Routes.HOME);
         if (officePath != null && officePath.isNotEmpty) {
           ExternalOfficeHandler.openOfficeDocument(officePath);
+        } else {
+          Get.offAllNamed(Routes.HOME);
         }
       });
       return;
     }
 
     // If the app was launched via an external PDF (WhatsApp, Telegram, File Manager),
-    // skip the 3-second splash delay and open the PDF immediately.
+    // skip the splash delay and open the PDF immediately.
     if (ExternalPdfHandler.hasPendingFile) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final path = ExternalPdfHandler.consumePendingFile();
-        Get.offAllNamed(Routes.HOME);
         if (path != null && path.isNotEmpty) {
           ExternalPdfHandler.openPdf(path);
+        } else {
+          Get.offAllNamed(Routes.HOME);
         }
       });
       return;
@@ -49,7 +51,9 @@ class _SplashViewState extends State<SplashView> {
     await Future.delayed(const Duration(milliseconds: 1600));
     if (!mounted) return;
     if (ExternalPdfHandler.hasPendingFile ||
+        ExternalPdfHandler.isResolvingExternalFile ||
         ExternalOfficeHandler.hasPendingOfficeFile ||
+        ExternalOfficeHandler.isResolvingExternalOffice ||
         Get.currentRoute == Routes.READER ||
         Get.currentRoute == Routes.OFFICE_VIEWER) {
       return;
@@ -60,13 +64,13 @@ class _SplashViewState extends State<SplashView> {
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
-      backgroundColor: isDarkMode 
-          ? const Color(0xFF070E17) 
+      backgroundColor: isDarkMode
+          ? const Color(0xFF070E17)
           : const Color(0xFFF4F6F9),
       body: const CustomSplashScreen(
-        duration: Duration(milliseconds: 1600), // Sync with the 3s delay
+        duration: Duration(milliseconds: 1600), // Sync with the 1.6s delay
       ),
     );
   }

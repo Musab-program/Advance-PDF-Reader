@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
+import '../../../core/utils/app_toast.dart';
 import '../services/pdf_tools_service.dart';
-import '../widgets/tool_result_sheet.dart';
+import '../widgets/tool_empty_view.dart';
+import '../widgets/success_dialog.dart';
 
 class _ImageItem {
   final String path;
@@ -68,21 +70,25 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
             ));
           }
         }
+        if (_nameController.text.trim().isEmpty && _images.isNotEmpty) {
+          _nameController.text = '${p.basenameWithoutExtension(_images.first.path)}_pdf';
+        }
         setState(() {});
       }
     } catch (e) {
-      Get.snackbar('error'.tr, e.toString(), backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError(e.toString());
     }
   }
 
   Future<void> _startConvert() async {
     if (_images.isEmpty) {
-      Get.snackbar(
-        'تنبيه',
-        'يرجى اختيار صورة واحدة على الأقل / Select at least 1 image',
-        backgroundColor: Colors.orange.shade800,
-        colorText: Colors.white,
-      );
+      AppToast.showWarning('يرجى اختيار صورة واحدة على الأقل');
+      return;
+    }
+
+    final customName = _nameController.text.trim();
+    if (customName.isEmpty) {
+      AppToast.showWarning('يرجى إدخال اسم ملف PDF الناتج أولاً');
       return;
     }
 
@@ -93,11 +99,10 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
     });
 
     final inputPaths = _images.map((e) => e.path).toList();
-    final customName = _nameController.text.trim();
 
     final result = await PdfToolsService().imagesToPdf(
       inputPaths,
-      outputFileName: customName.isNotEmpty ? customName : null,
+      outputFileName: customName,
       margin: _margin,
       onProgress: (prog, status) {
         setState(() {
@@ -111,20 +116,17 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
       _isProcessing = false;
     });
 
-    if (result.isSuccess && mounted) {
-      ToolResultSheet.show(
+    if (!mounted) return;
+
+    if (result.isSuccess) {
+      SuccessDialog.show(
         context,
-        result: result,
-        title: 'tool_img_to_pdf'.tr,
+        title: 'تم إنشاء ملف PDF بنجاح',
+        message: result.message ?? 'تم تحويل الصور وحفظ المستند بنجاح',
+        outputFiles: result.outputFiles,
       );
     } else {
-      Get.snackbar(
-        'error'.tr,
-        result.errorMessage ?? 'فشلت عملية التحويل',
-        backgroundColor: Colors.red.shade800,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      AppToast.showError(result.errorMessage ?? 'فشلت عملية التحويل');
     }
   }
 
@@ -156,7 +158,7 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
+                            color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
                           ),
                         ),
                       ),
@@ -176,37 +178,12 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                 ),
               if (_images.isEmpty)
                 Expanded(
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.add_photo_alternate_rounded, size: 64, color: primaryColor.withOpacity(0.4)),
-                          const SizedBox(height: 16),
-                          Text(
-                            'desc_img_to_pdf'.tr,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: primaryColor,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                            ),
-                            icon: const Icon(Icons.photo_library_rounded),
-                            label: const Text('اختيار صور من الجهاز'),
-                            onPressed: _pickImages,
-                          ),
-                        ],
-                      ),
-                    ),
+                  child: ToolEmptyView(
+                    imagePath: 'assets/vector/photos_to_pdf.png',
+                    description: 'تحويل مجموعة من الصور إلى مستند PDF عالي الجودة وبسهولة وسرعة.',
+                    actionLabel: 'اختر صوراً',
+                    actionIcon: Icons.add_photo_alternate_rounded,
+                    onAction: _isProcessing ? null : _pickImages,
                   ),
                 )
               else ...[
@@ -214,7 +191,7 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Text(
                     'اسحب المقبض ≡ لإعادة ترتيب الصور في صفحات PDF',
-                    style: TextStyle(fontSize: 11, color: theme.textTheme.bodySmall?.color?.withOpacity(0.6)),
+                    style: TextStyle(fontSize: 11, color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6)),
                   ),
                 ),
                 Expanded(
@@ -237,7 +214,7 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                           color: cardBg,
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withOpacity(0.3),
+                            color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3),
                           ),
                         ),
                         child: ListTile(
@@ -248,6 +225,7 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                               File(item.path),
                               width: 44,
                               height: 44,
+                              cacheWidth: 150,
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Container(
                                 width: 44,
@@ -267,7 +245,7 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                             'صفحة ${index + 1} • ${_formatSize(item.size)}',
                             style: TextStyle(
                               fontSize: 11,
-                              color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                              color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                             ),
                           ),
                           trailing: Row(
@@ -305,7 +283,7 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(isDark ? 0.35 : 0.08),
+                        color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
                         blurRadius: 15,
                         offset: const Offset(0, 4),
                       ),
@@ -317,7 +295,8 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                       TextField(
                         controller: _nameController,
                         decoration: InputDecoration(
-                          hintText: 'اسم ملف PDF الناتج (اختياري)',
+                          labelText: 'اسم ملف PDF الناتج',
+                          hintText: 'مثال: AuraPDF_images',
                           hintStyle: const TextStyle(fontSize: 12),
                           isDense: true,
                           prefixIcon: const Icon(Icons.edit_outlined, size: 18),
@@ -325,7 +304,7 @@ class _ImageToPdfViewState extends State<ImageToPdfView> {
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.3)),
+                            borderSide: BorderSide(color: theme.dividerColor.withValues(alpha: 0.3)),
                           ),
                         ),
                       ),

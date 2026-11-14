@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
+import '../../../core/utils/app_toast.dart';
 import '../services/pdf_tools_service.dart';
+import '../widgets/tool_empty_view.dart';
 import '../widgets/tool_result_sheet.dart';
 
 enum SplitMode { range, allPages, customRanges }
@@ -33,12 +35,16 @@ class _SplitPdfViewState extends State<SplitPdfView> {
   bool _isProcessing = false;
   double _progress = 0.0;
   String _progressStatus = '';
+  bool _isLoadingInitial = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.initialFilePath != null) {
-      _loadFile(widget.initialFilePath!);
+      _isLoadingInitial = true;
+      _loadFile(widget.initialFilePath!).whenComplete(() {
+        if (mounted) setState(() => _isLoadingInitial = false);
+      });
     }
   }
 
@@ -68,7 +74,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
         await _loadFile(result.files.single.path!);
       }
     } catch (e) {
-      Get.snackbar('error'.tr, e.toString(), backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError(e.toString());
     }
   }
 
@@ -78,10 +84,9 @@ class _SplitPdfViewState extends State<SplitPdfView> {
 
     try {
       final size = await file.length();
-      final bytes = await file.readAsBytes();
-      final doc = PdfDocument(inputBytes: bytes);
-      final count = doc.pages.count;
-      doc.dispose();
+      final rxDoc = await pdfrx.PdfDocument.openFile(path);
+      final count = rxDoc.pages.length;
+      await rxDoc.dispose();
 
       setState(() {
         _filePath = path;
@@ -91,7 +96,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
         _fromPageController.text = '1';
         _toPageController.text = count > 5 ? '5' : '$count';
         _customRangesController.text = count >= 4 ? '1-2, 3-$count' : '1, 2';
-        _outputNameController.text = p.basenameWithoutExtension(path);
+        _outputNameController.text = '${p.basenameWithoutExtension(path)}_split';
       });
     } catch (e) {
       final err = e.toString().toLowerCase();
@@ -99,49 +104,91 @@ class _SplitPdfViewState extends State<SplitPdfView> {
       if (err.contains('password') || err.contains('encrypt')) {
         msg = 'الملف محمي بكلمة مرور / Password protected PDF';
       }
-      Get.snackbar('error'.tr, msg, backgroundColor: Colors.red.shade800, colorText: Colors.white);
+      AppToast.showError(msg);
     }
   }
 
-  List<List<int>> _parseRanges() {
+  List<List<int>>? _parseRanges() {
     final List<List<int>> result = [];
     if (_splitMode == SplitMode.allPages) {
       for (int i = 0; i < _totalPages; i++) {
         result.add([i]);
       }
     } else if (_splitMode == SplitMode.range) {
-      final from = int.tryParse(_fromPageController.text.trim()) ?? 1;
-      final to = int.tryParse(_toPageController.text.trim()) ?? _totalPages;
-      final start = (from - 1).clamp(0, _totalPages - 1);
-      final end = (to - 1).clamp(start, _totalPages - 1);
+      final fromStr = _fromPageController.text.trim();
+      final toStr = _toPageController.text.trim();
+      final from = int.tryParse(fromStr);
+      final to = int.tryParse(toStr);
+
+      if (from == null || to == null) {
+        AppToast.showWarning('يرجى إدخال أرقام صفحات صحيحة');
+        return null;
+      }
+      if (from < 1 || to < 1 || from > _totalPages || to > _totalPages) {
+        AppToast.showWarning('أرقام الصفحات يجب أن تكون بين 1 و $_totalPages');
+        return null;
+      }
+      if (from > to) {
+        AppToast.showWarning('بداية النطاق يجب أن تكون أقل من أو تساوي نهايته ($from > $to)');
+        return null;
+      }
 
       final List<int> group = [];
-      for (int i = start; i <= end; i++) {
+      for (int i = from - 1; i <= to - 1; i++) {
         group.add(i);
       }
       result.add(group);
     } else if (_splitMode == SplitMode.customRanges) {
       final text = _customRangesController.text.trim();
+      if (text.isEmpty) {
+        AppToast.showWarning('يرجى إدخال نطاقات الصفحات');
+        return null;
+      }
       final parts = text.split(',');
       for (final rawPart in parts) {
         final part = rawPart.trim();
+        if (part.isEmpty) continue;
         if (part.contains('-')) {
           final bounds = part.split('-');
-          final s = (int.tryParse(bounds[0].trim()) ?? 1) - 1;
-          final e = (int.tryParse(bounds[1].trim()) ?? _totalPages) - 1;
-          final realStart = s.clamp(0, _totalPages - 1);
-          final realEnd = e.clamp(realStart, _totalPages - 1);
+          if (bounds.length != 2) {
+            AppToast.showWarning('صيغة النطاق "$part" غير صحيحة. استخدم الصيغة مثل 1-3');
+            return null;
+          }
+          final s = int.tryParse(bounds[0].trim());
+          final e = int.tryParse(bounds[1].trim());
+          if (s == null || e == null) {
+            AppToast.showWarning('أرقام الصفحات في "$part" غير صحيحة');
+            return null;
+          }
+          if (s < 1 || e < 1 || s > _totalPages || e > _totalPages) {
+            AppToast.showWarning('الصفحات في "$part" خارج حدود المستند (1 - $_totalPages)');
+            return null;
+          }
+          if (s > e) {
+            AppToast.showWarning('بداية النطاق أكبر من نهايته في "$part" ($s > $e)');
+            return null;
+          }
           final List<int> grp = [];
-          for (int i = realStart; i <= realEnd; i++) {
+          for (int i = s - 1; i <= e - 1; i++) {
             grp.add(i);
           }
           if (grp.isNotEmpty) result.add(grp);
         } else {
-          final single = (int.tryParse(part) ?? 1) - 1;
-          if (single >= 0 && single < _totalPages) {
-            result.add([single]);
+          final single = int.tryParse(part);
+          if (single == null) {
+            AppToast.showWarning('رقم الصفحة "$part" غير صالح');
+            return null;
           }
+          if (single < 1 || single > _totalPages) {
+            AppToast.showWarning('الصفحة $single خارج حدود المستند (1 - $_totalPages)');
+            return null;
+          }
+          result.add([single - 1]);
         }
+      }
+      if (result.isEmpty) {
+        AppToast.showWarning('لم يتم التعرف على أي نطاق صفحات صالح');
+        return null;
       }
     }
     return result;
@@ -150,9 +197,14 @@ class _SplitPdfViewState extends State<SplitPdfView> {
   Future<void> _startSplit() async {
     if (_filePath == null) return;
 
+    final customPrefix = _outputNameController.text.trim();
+    if (customPrefix.isEmpty) {
+      AppToast.showWarning('يرجى إدخال بادئة اسم الملفات الناتجة أولاً');
+      return;
+    }
+
     final ranges = _parseRanges();
-    if (ranges.isEmpty) {
-      Get.snackbar('error'.tr, 'يرجى تحديد نطاق صفحات صالح', backgroundColor: Colors.orange.shade800, colorText: Colors.white);
+    if (ranges == null || ranges.isEmpty) {
       return;
     }
 
@@ -165,7 +217,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
     final res = await PdfToolsService().splitPdf(
       _filePath!,
       pageRanges: ranges,
-      baseOutputName: _outputNameController.text.trim(),
+      baseOutputName: customPrefix,
       onProgress: (prog, status) {
         setState(() {
           _progress = prog;
@@ -185,13 +237,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
         title: 'tool_split_pdf'.tr,
       );
     } else {
-      Get.snackbar(
-        'error'.tr,
-        res.errorMessage ?? 'فشلت عملية التقسيم',
-        backgroundColor: Colors.red.shade800,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      AppToast.showError(res.errorMessage ?? 'فشلت عملية التقسيم');
     }
   }
 
@@ -210,38 +256,31 @@ class _SplitPdfViewState extends State<SplitPdfView> {
       ),
       body: Stack(
         children: [
-          if (_filePath == null)
+          if (_isLoadingInitial)
             Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.call_split_rounded, size: 64, color: primaryColor.withValues(alpha: 0.5)),
-                    const SizedBox(height: 16),
-                    Text(
-                      'desc_split_pdf'.tr,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
-                      ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: primaryColor),
+                  const SizedBox(height: 16),
+                  Text(
+                    'opening_file'.tr,
+                    style: TextStyle(
+                      color: theme.textTheme.bodyMedium?.color ?? Colors.grey,
+                      fontSize: 14,
                     ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      icon: const Icon(Icons.picture_as_pdf_rounded),
-                      label: const Text('اختر ملف PDF للتقسيم'),
-                      onPressed: _pickFile,
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+            )
+          else if (_filePath == null)
+            ToolEmptyView(
+              imagePath: 'assets/vector/cut_pdf.png',
+              title: 'tool_split_pdf'.tr,
+              description: 'تقسيم ملف PDF وقص صفحات معينة أو استخراج نطاق محدد بدقة عالية.',
+              actionLabel: 'اختر ملف PDF للتقسيم',
+              actionIcon: Icons.picture_as_pdf_rounded,
+              onAction: _pickFile,
             )
           else
             SingleChildScrollView(
@@ -255,7 +294,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withOpacity(0.3)),
+                      border: Border.all(color: isDark ? const Color(0xFF22304D) : theme.dividerColor.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
@@ -263,7 +302,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: primaryColor.withOpacity(0.12),
+                            color: primaryColor.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Icon(Icons.picture_as_pdf_rounded, color: primaryColor),
@@ -283,7 +322,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
                                 '$_totalPages صفحات • ${_formatSize(_fileSize)}',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                                  color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                                 ),
                               ),
                             ],
@@ -312,7 +351,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                      border: Border.all(color: theme.dividerColor.withValues(alpha: 0.3)),
                     ),
                     child: Column(
                       children: [
@@ -354,7 +393,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
                       decoration: BoxDecoration(
                         color: cardBg,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         children: [
@@ -391,7 +430,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
                       decoration: BoxDecoration(
                         color: cardBg,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.3)),
                       ),
                       child: TextField(
                         controller: _customRangesController,
@@ -411,7 +450,7 @@ class _SplitPdfViewState extends State<SplitPdfView> {
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                      border: Border.all(color: theme.dividerColor.withValues(alpha: 0.3)),
                     ),
                     child: TextField(
                       controller: _outputNameController,

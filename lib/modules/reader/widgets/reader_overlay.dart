@@ -91,6 +91,17 @@ class ReaderOverlay extends GetView<ReaderController> {
                               ),
                               IconButton(
                                 visualDensity: VisualDensity.compact,
+                                icon: Obx(() => Icon(
+                                      Icons.slow_motion_video_rounded,
+                                      color: controller.isAutoScrolling.value
+                                          ? const Color(0xFF7C4DFF)
+                                          : Colors.white,
+                                    )),
+                                tooltip: 'auto_scroll'.tr,
+                                onPressed: controller.toggleAutoScroll,
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.screen_rotation_rounded, color: Colors.white),
                                 tooltip: 'rotate_screen'.tr,
                                 onPressed: controller.toggleOrientation,

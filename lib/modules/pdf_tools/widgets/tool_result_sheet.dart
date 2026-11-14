@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import '../models/tool_task_result.dart';
+import 'success_dialog.dart';
 
 class ToolResultSheet extends StatelessWidget {
   final ToolTaskResult result;
@@ -15,15 +15,16 @@ class ToolResultSheet extends StatelessWidget {
     required this.title,
   });
 
+  /// Automatically shows the modern animated SuccessDialog featuring Success.png
   static Future<void> show(BuildContext context, {
     required ToolTaskResult result,
     required String title,
   }) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => ToolResultSheet(result: result, title: title),
+    return SuccessDialog.show(
+      context,
+      title: title,
+      message: result.message ?? 'تمت العملية بنجاح',
+      outputFiles: result.outputFiles,
     );
   }
 
@@ -56,7 +57,7 @@ class ToolResultSheet extends StatelessWidget {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.4 : 0.1),
+            color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.1),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -74,7 +75,7 @@ class ToolResultSheet extends StatelessWidget {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: theme.dividerColor.withOpacity(0.4),
+                  color: theme.dividerColor.withValues(alpha: 0.4),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -85,7 +86,7 @@ class ToolResultSheet extends StatelessWidget {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.14),
+                    color: Colors.green.withValues(alpha: 0.14),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
@@ -102,9 +103,9 @@ class ToolResultSheet extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        result.message ?? 'تمت العملية بنجاح / Operation completed',
+                        result.message ?? 'تمت العملية بنجاح',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
+                          color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
                         ),
                       ),
                     ],
@@ -118,7 +119,7 @@ class ToolResultSheet extends StatelessWidget {
               decoration: BoxDecoration(
                 color: theme.scaffoldBackgroundColor,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                border: Border.all(color: theme.dividerColor.withValues(alpha: 0.3)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,34 +142,21 @@ class ToolResultSheet extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (files.isNotEmpty) ...[
-                    const Divider(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          files.length == 1
-                              ? p.basename(files.first.path)
-                              : '${files.length} ملفات / files',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          _formatSize(totalSize),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.textTheme.bodySmall?.color?.withOpacity(0.7),
-                          ),
-                        ),
-                      ],
+                  const SizedBox(height: 8),
+                  Text(
+                    '${files.length} ملفات • ${_formatSize(totalSize)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
             Row(
               children: [
-                if (files.isNotEmpty) ...[
+                if (files.isNotEmpty)
                   Expanded(
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
@@ -177,48 +165,36 @@ class ToolResultSheet extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      icon: const Icon(Icons.remove_red_eye_outlined, size: 18),
-                      label: Text('preview'.tr.isNotEmpty ? 'preview'.tr : 'معاينة'),
+                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                      label: const Text('فتح الملف', style: TextStyle(fontWeight: FontWeight.bold)),
                       onPressed: () {
-                        final filePath = files.first.path;
-                        Navigator.of(context).pop();
-                        if (filePath.toLowerCase().endsWith('.pdf')) {
-                          Get.toNamed('/reader', arguments: {'singleFile': filePath});
-                        } else {
-                          OpenFilex.open(filePath);
-                        }
+                        SuccessDialog.openFileInsideApp(files.first);
                       },
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.share_outlined, size: 18),
-                      label: Text('share'.tr),
-                      onPressed: () {
-                        final xfiles = files.map((f) => XFile(f.path)).toList();
-                        Share.shareXFiles(xfiles);
-                      },
+                if (files.isNotEmpty) const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
+                    icon: const Icon(Icons.share_rounded, size: 18),
+                    label: Text('share'.tr, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () {
+                      if (files.isNotEmpty) {
+                        final xFiles = files.map((f) => XFile(f.path)).toList();
+                        SharePlus.instance.share(
+                          ShareParams(
+                            files: xFiles,
+                            text: title,
+                            sharePositionOrigin: const Rect.fromLTWH(0, 0, 100, 100),
+                          ),
+                        );
+                      }
+                    },
                   ),
-                ] else ...[
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text('close'.tr),
-                    ),
-                  ),
-                ],
+                ),
               ],
             ),
           ],
